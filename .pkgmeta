@@ -1,0 +1,9 @@
+package-as: PatronOrderTracker
+enable-nolib-creation: no
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+  - CHANGELOG.md
+  - CURSEFORGE_LISTING.md
+  - .pkgmeta
