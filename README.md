@@ -13,9 +13,10 @@ A single button on the Patron Orders tab that scans every loaded order for your 
 1. Open **Crafting Orders** > **Patron** at your profession's crafting table
 2. Wait for orders to load
 3. Click **"Create Auctionator Shopping List"**
-4. Go to the Auction House > Auctionator > **Shopping** tab
-5. Select your **"PatronOrderTracker - [Profession]"** list and search
-6. Click **"Clear Auctionator Shopping List"** when you're done
+4. Open the Auction House and click the **Shopping** tab (from Auctionator)
+5. Click your **"PatronOrderTracker - [Profession]"** list (Auctionator will automatically start searching)
+6. Click each result to buy — Auctionator tracks the quantities you need
+7. Click **"Clear Auctionator Shopping List"** when you're done
 
 ## Auctionator Integration
 
