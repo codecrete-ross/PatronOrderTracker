@@ -23,7 +23,7 @@ Shopping list creation requires [Auctionator](https://www.curseforge.com/wow/add
 
 ## Slash Commands
 
-- `/pot dump` - Opens a copyable diagnostic window showing every loaded patron order, reagent breakdown, and what the addon would track
+- `/pot dump` - Opens a copyable diagnostic window showing every loaded patron order, reagent breakdown, and what the addon would add to the shopping list
 - `/pot debug` - Toggles debug logging to chat
 
 ## Install

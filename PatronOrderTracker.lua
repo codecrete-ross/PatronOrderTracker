@@ -196,7 +196,7 @@ function POT:BuildDumpString()
                                 typeName, reagentName, needed, custQty))
                         end
                     else
-                        add(string.format("  [%s] %s: need %d (optional, not tracked)",
+                        add(string.format("  [%s] %s: need %d (optional, not included)",
                             typeName, reagentName, needed))
                     end
                 end
