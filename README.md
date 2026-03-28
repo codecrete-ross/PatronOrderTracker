@@ -12,7 +12,7 @@ A second button clears all tracking and removes the shopping list when you're do
 
 ## How To Use
 
-1. Open Professions > Crafting Orders > **Patron Orders** tab
+1. Open **Crafting Orders** > **Patron** at your profession's crafting table
 2. Wait for orders to load
 3. Click **"Track All Fulfillable Orders"**
 4. Go to the Auction House > Auctionator > **Shopping** tab
