@@ -8,7 +8,7 @@ POT.initialized = false
 POT.debug = false
 
 -- ---------------------------------------------------------------------------
--- Saved variables & event bootstrap
+-- Event bootstrap
 -- ---------------------------------------------------------------------------
 
 local eventFrame = CreateFrame("Frame")
@@ -17,10 +17,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "ADDON_LOADED" then
         local addon = ...
         if addon == ADDON_NAME then
-            if not PatronOrderTrackerCharDB then
-                PatronOrderTrackerCharDB = {}
-            end
-            POT.shoppingListName = PatronOrderTrackerCharDB.shoppingListName
             eventFrame:UnregisterEvent("ADDON_LOADED")
             eventFrame:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED")
         end
@@ -303,7 +299,16 @@ function POT:UpdateButtonState()
         POT.trackButton:SetShown(isNpcTab and browseVisible)
     end
     if POT.clearButton then
-        POT.clearButton:SetShown(isNpcTab and browseVisible and POT.shoppingListName ~= nil)
+        local listExists = false
+        if isNpcTab and browseVisible and Auctionator and Auctionator.Shopping then
+            local profInfo = C_TradeSkillUI.GetChildProfessionInfo()
+            local profName = profInfo and (profInfo.parentProfessionName or profInfo.professionName)
+            if profName then
+                local name = "PatronOrderTracker - " .. profName
+                listExists = Auctionator.Shopping.ListManager:GetIndexForName(name) ~= nil
+            end
+        end
+        POT.clearButton:SetShown(listExists)
     end
 end
 
@@ -337,7 +342,6 @@ function POT:ScanAndCreateList()
     local profInfo = C_TradeSkillUI.GetChildProfessionInfo()
     local profName = profInfo and (profInfo.parentProfessionName or profInfo.professionName) or "Unknown"
     POT.shoppingListName = "PatronOrderTracker - " .. profName
-    PatronOrderTrackerCharDB.shoppingListName = POT.shoppingListName
 
     local scannedCount = 0
     local skippedCount = 0
@@ -525,6 +529,5 @@ function POT:ClearShoppingList()
 
     PrintMsg("Removed shopping list: " .. POT.shoppingListName)
     POT.shoppingListName = nil
-    PatronOrderTrackerCharDB.shoppingListName = nil
     POT:UpdateButtonState()
 end
