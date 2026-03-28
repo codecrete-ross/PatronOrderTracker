@@ -1,12 +1,10 @@
 local ADDON_NAME = "PatronOrderTracker"
 local POT = {}
 
-POT.trackedRecipes = {}
 POT.shoppingListName = nil
 POT.trackButton = nil
 POT.clearButton = nil
 POT.initialized = false
-POT.trackErrorLogged = false
 POT.debug = false
 
 -- ---------------------------------------------------------------------------
@@ -19,7 +17,10 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "ADDON_LOADED" then
         local addon = ...
         if addon == ADDON_NAME then
-            POT:OnAddonLoaded()
+            if not PatronOrderTrackerCharDB then
+                PatronOrderTrackerCharDB = {}
+            end
+            POT.shoppingListName = PatronOrderTrackerCharDB.shoppingListName
             eventFrame:UnregisterEvent("ADDON_LOADED")
             eventFrame:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED")
         end
@@ -29,17 +30,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         end
     end
 end)
-
-function POT:OnAddonLoaded()
-    if not PatronOrderTrackerDB then
-        PatronOrderTrackerDB = { trackedRecipes = {} }
-    end
-    if not PatronOrderTrackerDB.trackedRecipes then
-        PatronOrderTrackerDB.trackedRecipes = {}
-    end
-    -- Work directly on the saved table so changes persist without re-assignment
-    POT.trackedRecipes = PatronOrderTrackerDB.trackedRecipes
-end
 
 -- ---------------------------------------------------------------------------
 -- Chat helper
@@ -128,7 +118,6 @@ function POT:BuildDumpString()
     local lines = {}
     local function add(s) lines[#lines + 1] = s end
 
-    -- Header
     add("== Patron Order Tracker Dump ==")
     add("")
 
@@ -151,7 +140,6 @@ function POT:BuildDumpString()
     add(string.format("Data: %d flat orders, %d buckets", #flatOrders, #buckets))
     add("")
 
-    -- Filter to Npc orders only
     local npcOrders = {}
     for _, order in ipairs(flatOrders) do
         if order.orderType == Enum.CraftingOrderType.Npc then
@@ -164,7 +152,6 @@ function POT:BuildDumpString()
         return table.concat(lines, "\n")
     end
 
-    -- Orders
     local orderList = #npcOrders > 0 and npcOrders or nil
     if orderList then
         add(string.format("=== %d Patron Orders (Flat) ===", #orderList))
@@ -179,13 +166,10 @@ function POT:BuildDumpString()
             add(string.format("Recipe: spellID %d | Learned: %s", order.spellID, learned and "Yes" or "No"))
             add("Quality Requested: " .. QualityStars(order.minQuality))
             add("Reagent State: " .. (REAGENT_STATE_NAMES[order.reagentState] or tostring(order.reagentState)))
-            add("isFulfillable: " .. tostring(order.isFulfillable))
             add("isRecraft: " .. tostring(order.isRecraft))
 
-            -- Reagent breakdown
             local schematic = C_TradeSkillUI.GetRecipeSchematic(order.spellID, order.isRecraft)
             if schematic and schematic.reagentSlotSchematics then
-                -- Build customer-provided lookup
                 local customerProvided = {}
                 if order.reagents then
                     for _, r in ipairs(order.reagents) do
@@ -222,7 +206,6 @@ function POT:BuildDumpString()
             add("")
         end
     else
-        -- Bucketed fallback
         add(string.format("=== %d Recipe Buckets ===", #buckets))
         add("(Per-order reagent detail unavailable in bucketed mode)")
         add("")
@@ -238,12 +221,8 @@ function POT:BuildDumpString()
         end
     end
 
-    -- Tracked recipes
-    local trackedCount = 0
-    for _ in pairs(POT.trackedRecipes) do trackedCount = trackedCount + 1 end
-    add(string.format("Addon-tracked recipes: %d", trackedCount))
     if POT.shoppingListName then
-        add("Shopping list name: " .. POT.shoppingListName)
+        add("Shopping list: " .. POT.shoppingListName)
     end
 
     return table.concat(lines, "\n")
@@ -266,15 +245,6 @@ SlashCmdList["PATRONORDERTRACKER"] = function(input)
     end
 end
 
-local function TrySetRecipeTracked(recipeID, tracked, isRecraft)
-    local ok, err = pcall(C_TradeSkillUI.SetRecipeTracked, recipeID, tracked, isRecraft)
-    if not ok and not POT.trackErrorLogged then
-        PrintMsg("|cffff6666SetRecipeTracked failed:|r " .. tostring(err))
-        POT.trackErrorLogged = true
-    end
-    return ok
-end
-
 -- ---------------------------------------------------------------------------
 -- UI injection
 -- ---------------------------------------------------------------------------
@@ -288,33 +258,28 @@ function POT:InjectButtons()
     local browseFrame = ProfessionsFrame.OrdersPage.BrowseFrame
     if not browseFrame then return end
 
-    -- Track All button
     POT.trackButton = CreateFrame("Button", nil, browseFrame, "UIPanelButtonTemplate")
-    POT.trackButton:SetSize(200, 22)
-    POT.trackButton:SetText("Track All Fulfillable Orders")
+    POT.trackButton:SetSize(220, 22)
+    POT.trackButton:SetText("Create Auctionator Shopping List")
     POT.trackButton:SetPoint("TOPRIGHT", browseFrame, "TOPRIGHT", -8, -32)
-    POT.trackButton:SetScript("OnClick", function() POT:ScanAndTrackAll() end)
+    POT.trackButton:SetScript("OnClick", function() POT:ScanAndCreateList() end)
     POT.trackButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine("Tracks every Patron Order you can fulfill.")
-        GameTooltip:AddLine("Only reagents you must supply are added to the Auctionator shopping list.", 1, 1, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Create an Auctionator shopping list that only includes the reagents you must supply.", 1, 1, 1)
         GameTooltip:Show()
     end)
     POT.trackButton:SetScript("OnLeave", GameTooltip_Hide)
 
-    -- Clear button
     POT.clearButton = CreateFrame("Button", nil, browseFrame, "UIPanelButtonTemplate")
-    POT.clearButton:SetSize(160, 22)
-    POT.clearButton:SetText("Clear Patron Tracking")
+    POT.clearButton:SetSize(210, 22)
+    POT.clearButton:SetText("Clear Auctionator Shopping List")
     POT.clearButton:SetPoint("RIGHT", POT.trackButton, "LEFT", -5, 0)
-    POT.clearButton:SetScript("OnClick", function() POT:ClearAllTracking() end)
+    POT.clearButton:SetScript("OnClick", function() POT:ClearShoppingList() end)
 
-    -- Hook tab switching
     hooksecurefunc(ProfessionsFrame.OrdersPage, "SetCraftingOrderType", function()
         POT:UpdateButtonState()
     end)
 
-    -- Hide when BrowseFrame hides (viewing an individual order)
     browseFrame:HookScript("OnHide", function()
         if POT.trackButton then POT.trackButton:Hide() end
         if POT.clearButton then POT.clearButton:Hide() end
@@ -338,26 +303,24 @@ function POT:UpdateButtonState()
         POT.trackButton:SetShown(isNpcTab and browseVisible)
     end
     if POT.clearButton then
-        POT.clearButton:SetShown(isNpcTab and browseVisible and next(POT.trackedRecipes) ~= nil)
+        POT.clearButton:SetShown(isNpcTab and browseVisible and POT.shoppingListName ~= nil)
     end
 end
 
 -- ---------------------------------------------------------------------------
--- Core scan & track
+-- Core scan
 -- ---------------------------------------------------------------------------
 
-function POT:ScanAndTrackAll()
-    -- Determine data source: flat orders vs buckets
+function POT:ScanAndCreateList()
     local flatOrders = C_CraftingOrders.GetCrafterOrders() or {}
     local buckets = C_CraftingOrders.GetCrafterBuckets() or {}
 
     DebugMsg(string.format("GetCrafterOrders returned %d, GetCrafterBuckets returned %d", #flatOrders, #buckets))
 
-    -- Filter flat orders to Npc type only
     local npcOrders = {}
     for _, order in ipairs(flatOrders) do
-        DebugMsg(string.format("  Flat order: spellID=%s type=%s fulfillable=%s",
-            tostring(order.spellID), tostring(order.orderType), tostring(order.isFulfillable)))
+        DebugMsg(string.format("  Flat order: spellID=%s type=%s",
+            tostring(order.spellID), tostring(order.orderType)))
         if order.orderType == Enum.CraftingOrderType.Npc then
             table.insert(npcOrders, order)
         end
@@ -371,17 +334,16 @@ function POT:ScanAndTrackAll()
         return
     end
 
-    -- Profession info for shopping list name
     local profInfo = C_TradeSkillUI.GetChildProfessionInfo()
     local profName = profInfo and (profInfo.parentProfessionName or profInfo.professionName) or "Unknown"
     POT.shoppingListName = "PatronOrderTracker - " .. profName
+    PatronOrderTrackerCharDB.shoppingListName = POT.shoppingListName
 
-    local trackedCount = 0
+    local scannedCount = 0
     local skippedCount = 0
-    local reagentTotals = {} -- { [itemID] = count }
+    local reagentTotals = {}
 
     if useBuckets then
-        -- Bucketed mode: no per-order reagent details, estimate from schematic
         for i, bucket in ipairs(buckets) do
             local recipeInfo = C_TradeSkillUI.GetRecipeInfo(bucket.spellID)
             DebugMsg(string.format("  Bucket[%d]: spellID=%s learned=%s numAvailable=%s",
@@ -389,21 +351,14 @@ function POT:ScanAndTrackAll()
                 tostring(recipeInfo and recipeInfo.learned),
                 tostring(bucket.numAvailable)))
             if recipeInfo and recipeInfo.learned then
-                local wasAlreadyTracked = C_TradeSkillUI.IsRecipeTracked(bucket.spellID, false)
-                if not wasAlreadyTracked then
-                    if TrySetRecipeTracked(bucket.spellID, true, false) then
-                        POT.trackedRecipes[bucket.spellID] = true
-                    end
-                end
                 POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
-                trackedCount = trackedCount + 1
+                scannedCount = scannedCount + 1
             else
                 skippedCount = skippedCount + 1
             end
         end
         PrintMsg("Note: Reagent counts are estimated (individual order details not loaded).")
     else
-        -- Flat mode: full per-order reagent data
         for i, order in ipairs(npcOrders) do
             local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
             local learned = recipeInfo and recipeInfo.learned
@@ -411,28 +366,20 @@ function POT:ScanAndTrackAll()
                 i, tostring(order.spellID), tostring(learned),
                 tostring(order.isRecraft), order.reagents and #order.reagents or 0))
             if learned then
-                local wasAlreadyTracked = C_TradeSkillUI.IsRecipeTracked(order.spellID, order.isRecraft)
-                if not wasAlreadyTracked then
-                    if TrySetRecipeTracked(order.spellID, true, order.isRecraft) then
-                        POT.trackedRecipes[order.spellID] = true
-                    end
-                end
                 POT:CalculatePlayerReagents(order, reagentTotals)
-                trackedCount = trackedCount + 1
+                scannedCount = scannedCount + 1
             else
                 skippedCount = skippedCount + 1
             end
         end
     end
 
-    if trackedCount == 0 then
+    if scannedCount == 0 then
         PrintMsg("No fulfillable patron orders found.")
         return
     end
 
-    -- Create Auctionator shopping list, then print summary once it's done
-    POT:CreateShoppingList(reagentTotals, trackedCount, skippedCount)
-
+    POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount)
     POT:UpdateButtonState()
 end
 
@@ -444,8 +391,7 @@ function POT:CalculatePlayerReagents(order, totals)
     local schematic = C_TradeSkillUI.GetRecipeSchematic(order.spellID, order.isRecraft)
     if not schematic or not schematic.reagentSlotSchematics then return end
 
-    -- Build lookup: how much the customer provides per slot
-    local customerProvided = {} -- { [slotIndex] = quantity }
+    local customerProvided = {}
     if order.reagents then
         for _, orderReagent in ipairs(order.reagents) do
             local slot = orderReagent.slotIndex
@@ -454,7 +400,6 @@ function POT:CalculatePlayerReagents(order, totals)
         end
     end
 
-    -- Walk schematic slots, compute delta
     for _, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
         if slotSchematic.reagentType == Enum.CraftingReagentType.Basic
            and slotSchematic.required
@@ -496,43 +441,40 @@ end
 -- Auctionator shopping list
 -- ---------------------------------------------------------------------------
 
-local function PrintSummary(trackedCount, skippedCount, reagentCount, hasShoppingList)
-    local msg = string.format("Tracked %d patron order%s", trackedCount, trackedCount == 1 and "" or "s")
+local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppingList)
+    local msg = string.format("Scanned %d patron order%s", scannedCount, scannedCount == 1 and "" or "s")
     if hasShoppingList and reagentCount > 0 then
         msg = msg .. string.format(" · %d reagent%s added to shopping list",
             reagentCount, reagentCount == 1 and "" or "s")
     end
     PrintMsg(msg)
     if skippedCount > 0 then
-        PrintMsg(string.format("Skipped %d unfulfillable order%s.", skippedCount, skippedCount == 1 and "" or "s"))
+        PrintMsg(string.format("Skipped %d order%s (recipe not learned).", skippedCount, skippedCount == 1 and "" or "s"))
     end
 end
 
-function POT:CreateShoppingList(reagentTotals, trackedCount, skippedCount)
-    -- Count total reagents
+function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount)
     local totalReagentCount = 0
     for _, count in pairs(reagentTotals) do
         totalReagentCount = totalReagentCount + count
     end
 
     if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
-        PrintSummary(trackedCount, skippedCount, totalReagentCount, false)
-        PrintMsg("Auctionator not detected - recipes tracked in objective tracker only.")
+        PrintSummary(scannedCount, skippedCount, totalReagentCount, false)
+        PrintMsg("Auctionator not detected - no shopping list created.")
         return
     end
 
-    -- Collect itemIDs needing name resolution
     local pendingItems = {}
     for itemID, count in pairs(reagentTotals) do
         table.insert(pendingItems, { itemID = itemID, count = count })
     end
 
     if #pendingItems == 0 then
-        PrintSummary(trackedCount, skippedCount, 0, false)
+        PrintSummary(scannedCount, skippedCount, 0, false)
         return
     end
 
-    -- Use ContinuableContainer for batch async item name resolution
     local continuableContainer = ContinuableContainer:Create()
     for _, pending in ipairs(pendingItems) do
         continuableContainer:AddContinuable(Item:CreateFromItemID(pending.itemID))
@@ -554,31 +496,25 @@ function POT:CreateShoppingList(reagentTotals, trackedCount, skippedCount)
 
         if #searchStrings > 0 then
             Auctionator.API.v1.CreateShoppingList(ADDON_NAME, POT.shoppingListName, searchStrings)
-            PrintSummary(trackedCount, skippedCount, totalReagentCount, true)
+            PrintSummary(scannedCount, skippedCount, totalReagentCount, true)
         else
-            PrintSummary(trackedCount, skippedCount, 0, false)
+            PrintSummary(scannedCount, skippedCount, 0, false)
             PrintMsg("No player-supplied reagents needed (customers provided everything).")
         end
     end)
 end
 
 -- ---------------------------------------------------------------------------
--- Clear tracking
+-- Clear shopping list
 -- ---------------------------------------------------------------------------
 
-function POT:ClearAllTracking()
-    local count = 0
-    for recipeID in pairs(POT.trackedRecipes) do
-        TrySetRecipeTracked(recipeID, false, false)
-        TrySetRecipeTracked(recipeID, false, true)
-        count = count + 1
+function POT:ClearShoppingList()
+    if not POT.shoppingListName then
+        PrintMsg("Nothing to clear.")
+        return
     end
 
-    wipe(POT.trackedRecipes)
-
-    -- Delete Auctionator shopping list (no public delete API; ListManager:Delete is what
-    -- CreateShoppingList uses internally, so this is the standard pattern)
-    if Auctionator and Auctionator.Shopping and POT.shoppingListName then
+    if Auctionator and Auctionator.Shopping then
         pcall(function()
             local listIndex = Auctionator.Shopping.ListManager:GetIndexForName(POT.shoppingListName)
             if listIndex then
@@ -587,12 +523,8 @@ function POT:ClearAllTracking()
         end)
     end
 
-    if count > 0 then
-        PrintMsg(string.format("Cleared tracking for %d recipe%s and removed shopping list.",
-            count, count == 1 and "" or "s"))
-    else
-        PrintMsg("Nothing to clear.")
-    end
-
+    PrintMsg("Removed shopping list: " .. POT.shoppingListName)
+    POT.shoppingListName = nil
+    PatronOrderTrackerCharDB.shoppingListName = nil
     POT:UpdateButtonState()
 end

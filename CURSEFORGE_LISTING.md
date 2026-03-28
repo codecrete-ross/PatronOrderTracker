@@ -38,10 +38,10 @@ Head to the Auction House, open Auctionator's Shopping tab, find your **"PatronO
 
 1. Open **Crafting Orders** > **Patron** at your profession's crafting table
 2. Wait for orders to load
-3. Click **"Track All Fulfillable Orders"**
+3. Click **"Create Shopping List"**
 4. Go to the Auction House > Auctionator > Shopping tab
 5. Select your **"PatronOrderTracker - [Profession]"** list and search
-6. Click **"Clear Patron Tracking"** when you're done
+6. Click **"Clear Shopping List"** when you're done
 
 ### Auctionator Required
 
