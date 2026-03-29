@@ -1,3 +1,7 @@
+## 1.0.6
+
+- Updated Interface version to 120005 (Patch 12.0.5)
+
 ## 1.0.5
 
 - CurseForge changelog now uses curated CHANGELOG.md instead of raw git log
