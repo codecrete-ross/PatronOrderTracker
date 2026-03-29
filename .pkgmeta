@@ -1,9 +1,11 @@
 package-as: PatronOrderTracker
 enable-nolib-creation: no
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
 ignore:
   - .github
   - .gitignore
   - README.md
-  - CHANGELOG.md
   - .pkgmeta
   - logo.png

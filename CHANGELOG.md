@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+- CurseForge changelog now uses curated CHANGELOG.md instead of raw git log
+
+## 1.0.4
+
+- Reduced CurseForge package size by excluding logo.png (only logo.tga is needed in-game)
+
 ## 1.0.3
 
 - Fixed clear button appearing on login/reload when no shopping list exists
