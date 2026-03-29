@@ -9,18 +9,14 @@
 ## 1.0.3
 
 - Fixed clear button appearing on login/reload when no shopping list exists
-- Removed per-character SavedVariables; clear button now checks Auctionator's live state directly
 
 ## 1.0.2
 
 - Fixed stale verbiage across documentation and in-game dump output
-- Removed CurseForge listing file (no longer needed)
-- Cleaned up TOC notes
 
 ## 1.0.1
 
 - Removed recipe tracking (objective tracker) — the addon now focuses entirely on Auctionator shopping list creation
-- Removed SavedVariables (no longer needed)
 - Simplified "Clear" button to only delete the shopping list
 - Cleaned up chat output messaging
 
