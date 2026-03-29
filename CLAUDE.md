@@ -74,3 +74,15 @@ Never push, tag, or release untested changes. Copy to the WoW folder and stop �
 
 - `/pot dump` — copyable diagnostic dialog with per-order reagent breakdown
 - `/pot debug` — toggle verbose debug logging to chat
+
+## Compatibility & Versioning
+
+Before making any update, verify:
+
+1. **WoW client version** — run `/dump (select(4, GetBuildInfo()))` in-game to get the current Interface number. Update `## Interface:` in the TOC if it's changed. Format: 12.0.5 → 120005.
+2. **Auctionator API** — read the installed source at `G:\Battle.net Games\World of Warcraft\_retail_\Interface\AddOns\Auctionator\Source\API\v1\ShoppingLists.lua` to verify function signatures haven't changed. Check `Auctionator.toc` for their current Interface version.
+3. **Blizzard Professions UI** — if a major patch lands, check Gethe/wow-ui-source `live` branch for changes to `Blizzard_ProfessionsCrafterOrderPage.lua/.xml` (frame names, mixin changes, new/removed hooks).
+
+The addon uses only stable non-combat APIs. Minor WoW patches (12.0.x) rarely break these. Major patches (12.1, 13.0) may change frame hierarchy or API signatures — verify before releasing.
+
+The `## Interface` version in the TOC should always match the current live retail patch to avoid the "out of date" addon warning in-game.
