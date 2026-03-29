@@ -5,5 +5,5 @@ ignore:
   - .gitignore
   - README.md
   - CHANGELOG.md
-  - CURSEFORGE_LISTING.md
   - .pkgmeta
+  - logo.png
