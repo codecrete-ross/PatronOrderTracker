@@ -21,7 +21,7 @@ A single button on the Patron Orders tab that scans every loaded order for your 
 3. (Optional) Click the **gear button** to set an order budget — orders over this cost will be skipped
 4. Click **"Create Auctionator Shopping List"**
 5. Open the Auction House and open the **Shopping** tab in Auctionator
-6. Select your **"POT - [Prof] (Character-Realm)"** list
+6. Select your shopping list: **"POT - LW (Bigcatross-Area52)"**
 7. Click **"Clear Auctionator Shopping List"** when you're done
 
 ## Requirements
