@@ -1,6 +1,10 @@
+## 1.0.7
+
+- Fixed incorrect Interface version (120005 → 120001) that caused the addon to show as "Incompatible"
+
 ## 1.0.6
 
-- Updated Interface version to 120005 (Patch 12.0.5)
+- Updated Interface version to 120005 (Patch 12.0.5) — **incorrect, reverted in 1.0.7**
 
 ## 1.0.5
 
