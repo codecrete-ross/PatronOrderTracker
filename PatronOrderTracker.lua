@@ -4,6 +4,8 @@ local POT = {}
 POT.shoppingListName = nil
 POT.trackButton = nil
 POT.clearButton = nil
+POT.configButton = nil
+POT.configFrame = nil
 POT.initialized = false
 POT.debug = false
 
@@ -18,6 +20,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         local addon = ...
         if addon == ADDON_NAME then
             eventFrame:UnregisterEvent("ADDON_LOADED")
+            if not PatronOrderTrackerDB then PatronOrderTrackerDB = {} end
             eventFrame:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED")
         end
     elseif event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
@@ -40,6 +43,23 @@ local function DebugMsg(msg)
         print("|cff888888[POT Debug]|r " .. msg)
     end
 end
+
+local function BuildCustomerProvidedMap(order)
+    local map = {}
+    if order.reagents then
+        for _, r in ipairs(order.reagents) do
+            local qty = r.reagentInfo and r.reagentInfo.quantity or 0
+            map[r.slotIndex] = (map[r.slotIndex] or 0) + qty
+        end
+    end
+    return map
+end
+
+local PROF_ABBR = {
+    ["Alchemy"] = "Alch.", ["Blacksmithing"] = "BS", ["Enchanting"] = "Ench.",
+    ["Engineering"] = "Eng.", ["Inscription"] = "Insc.", ["Jewelcrafting"] = "JC",
+    ["Leatherworking"] = "LW", ["Tailoring"] = "Tail.",
+}
 
 -- ---------------------------------------------------------------------------
 -- Copyable dump dialog (SimC-style)
@@ -67,30 +87,37 @@ function POT:ShowDumpDialog(text)
         f:SetSize(620, 450)
         f:SetPoint("CENTER")
         f:SetBackdrop({
-            bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-            edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 16,
-            insets = { left = 4, right = 4, top = 4, bottom = 4 },
+            bgFile = "Interface/DialogFrame/UI-DialogBox-Background",
+            edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 },
         })
-        f:SetBackdropColor(0, 0, 0, 0.9)
         f:SetFrameStrata("DIALOG")
         f:SetMovable(true)
         f:EnableMouse(true)
+        f:EnableKeyboard(true)
         f:RegisterForDrag("LeftButton")
         f:SetScript("OnDragStart", f.StartMoving)
         f:SetScript("OnDragStop", f.StopMovingOrSizing)
-        table.insert(UISpecialFrames, "PatronOrderTrackerDumpFrame")
+        f:SetScript("OnKeyDown", function(self, key)
+            if key == "ESCAPE" then
+                self:SetPropagateKeyboardInput(false)
+                self:Hide()
+            else
+                self:SetPropagateKeyboardInput(true)
+            end
+        end)
 
         local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        title:SetPoint("TOP", 0, -10)
+        title:SetPoint("TOP", 0, -16)
         title:SetText("Patron Order Tracker - Diagnostic Dump")
 
         local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-        close:SetPoint("TOPRIGHT", -2, -2)
+        close:SetPoint("TOPRIGHT", -4, -4)
 
         local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-        sf:SetPoint("TOPLEFT", 12, -34)
-        sf:SetPoint("BOTTOMRIGHT", -30, 12)
+        sf:SetPoint("TOPLEFT", 16, -40)
+        sf:SetPoint("BOTTOMRIGHT", -34, 16)
 
         local eb = CreateFrame("EditBox", nil, sf)
         eb:SetMultiLine(true)
@@ -166,13 +193,7 @@ function POT:BuildDumpString()
 
             local schematic = C_TradeSkillUI.GetRecipeSchematic(order.spellID, order.isRecraft)
             if schematic and schematic.reagentSlotSchematics then
-                local customerProvided = {}
-                if order.reagents then
-                    for _, r in ipairs(order.reagents) do
-                        local qty = r.reagentInfo and r.reagentInfo.quantity or 0
-                        customerProvided[r.slotIndex] = (customerProvided[r.slotIndex] or 0) + qty
-                    end
-                end
+                local customerProvided = BuildCustomerProvidedMap(order)
 
                 add("Reagents:")
                 for _, slot in ipairs(schematic.reagentSlotSchematics) do
@@ -225,6 +246,148 @@ function POT:BuildDumpString()
 end
 
 -- ---------------------------------------------------------------------------
+-- Settings popup
+-- ---------------------------------------------------------------------------
+
+function POT:SaveCeilingSetting(text)
+    local gold = tonumber(text)
+    local prev = PatronOrderTrackerDB.priceCeiling
+    if not gold or gold <= 0 then
+        PatronOrderTrackerDB.priceCeiling = nil
+        if prev then PrintMsg("Order budget removed.") end
+    else
+        local newCeiling = math.floor(gold * 10000)
+        PatronOrderTrackerDB.priceCeiling = newCeiling
+        if newCeiling ~= prev then
+            PrintMsg(string.format("Order budget set to %s.",
+                GetCoinTextureString(newCeiling)))
+        end
+    end
+    POT:RefreshCostOverlays()
+end
+
+function POT:CreateConfigPopup()
+    if POT.configFrame then return end
+
+    local f = CreateFrame("Frame", "PatronOrderTrackerConfigFrame", UIParent, "BackdropTemplate")
+    f:SetSize(300, 225)
+    f:SetPoint("CENTER")
+    f:SetBackdrop({
+        bgFile = "Interface/DialogFrame/UI-DialogBox-Background",
+        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 12, top = 12, bottom = 11 },
+    })
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:EnableKeyboard(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then
+            self:SetPropagateKeyboardInput(false)
+            self:Hide()
+        else
+            self:SetPropagateKeyboardInput(true)
+        end
+    end)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -16)
+    title:SetText("Patron Order Tracker Settings")
+
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -4, -4)
+
+    local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    label:SetPoint("TOPLEFT", 20, -50)
+    label:SetText("Order budget:")
+
+    local input = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    input:SetSize(100, 20)
+    input:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 4, -8)
+    input:SetAutoFocus(false)
+    input:SetMaxLetters(10)
+    input:SetNumeric(true)
+    input:SetJustifyH("RIGHT")
+    input:SetTextInsets(5, 8, 0, 0)
+
+    local goldLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    goldLabel:SetPoint("LEFT", input, "RIGHT", 6, 0)
+    goldLabel:SetText("|TInterface\\MoneyFrame\\UI-GoldIcon:0|t")
+
+    local resetButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    resetButton:SetSize(60, 20)
+    resetButton:SetPoint("LEFT", goldLabel, "RIGHT", 8, 0)
+    resetButton:SetText("Clear")
+    resetButton:SetScript("OnClick", function()
+        input:SetText("")
+        input:ClearFocus()
+        POT:SaveCeilingSetting("")
+    end)
+
+    local help = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    help:SetPoint("TOPLEFT", input, "BOTTOMLEFT", -4, -12)
+    help:SetPoint("RIGHT", f, "RIGHT", -20, 0)
+    help:SetJustifyH("LEFT")
+    help:SetText("|cff888888Orders that cost more than this will be excluded.\nRequires a recent AH scan for accurate prices.|r")
+
+    local showCostsCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    showCostsCheck:SetPoint("TOPLEFT", help, "BOTTOMLEFT", -2, -6)
+    showCostsCheck.text = showCostsCheck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    showCostsCheck.text:SetPoint("LEFT", showCostsCheck, "RIGHT", 2, 0)
+    showCostsCheck.text:SetText("Show material costs in order list")
+    showCostsCheck:SetScript("OnClick", function(self)
+        PatronOrderTrackerDB.showCostOverlay = self:GetChecked()
+        POT:RefreshCostOverlays()
+    end)
+
+    local doneButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    doneButton:SetSize(100, 22)
+    doneButton:SetPoint("BOTTOM", f, "BOTTOM", 0, 16)
+    doneButton:SetText("Done")
+    doneButton:SetScript("OnClick", function()
+        POT:SaveCeilingSetting(input:GetText())
+        input:ClearFocus()
+        f:Hide()
+    end)
+    input:SetScript("OnEnterPressed", function(self)
+        POT:SaveCeilingSetting(self:GetText())
+        self:ClearFocus()
+        f:Hide()
+    end)
+    input:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        f:Hide()
+    end)
+
+    f:SetScript("OnShow", function()
+        local ceiling = PatronOrderTrackerDB and PatronOrderTrackerDB.priceCeiling
+        if ceiling and ceiling > 0 then
+            input:SetText(tostring(math.floor(ceiling / 10000)))
+        else
+            input:SetText("")
+        end
+        showCostsCheck:SetChecked(PatronOrderTrackerDB.showCostOverlay ~= false)
+    end)
+
+    f.input = input
+    POT.configFrame = f
+    f:Hide()
+end
+
+function POT:ToggleConfigPopup()
+    POT:CreateConfigPopup()
+    if POT.configFrame:IsShown() then
+        POT.configFrame:Hide()
+    else
+        POT.configFrame:Show()
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- Slash commands
 -- ---------------------------------------------------------------------------
 
@@ -246,6 +409,8 @@ end
 -- ---------------------------------------------------------------------------
 
 function POT:InjectButtons()
+    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then return end
+
     if POT.initialized then
         POT:UpdateButtonState()
         return
@@ -257,14 +422,30 @@ function POT:InjectButtons()
     POT.trackButton = CreateFrame("Button", nil, browseFrame, "UIPanelButtonTemplate")
     POT.trackButton:SetSize(220, 22)
     POT.trackButton:SetText("Create Auctionator Shopping List")
-    POT.trackButton:SetPoint("TOPRIGHT", browseFrame, "TOPRIGHT", -8, -32)
+    POT.trackButton:SetPoint("TOPRIGHT", browseFrame, "TOPRIGHT", -35, -32)
     POT.trackButton:SetScript("OnClick", function() POT:ScanAndCreateList() end)
     POT.trackButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Create an Auctionator shopping list that only includes the reagents you must supply.", 1, 1, 1)
+        GameTooltip:AddLine("Create an Auctionator shopping list with only the reagents you need to supply.", 1, 1, 1)
         GameTooltip:Show()
     end)
     POT.trackButton:SetScript("OnLeave", GameTooltip_Hide)
+
+    POT.configButton = CreateFrame("Button", nil, browseFrame, "UIPanelButtonTemplate")
+    POT.configButton:SetSize(26, 22)
+    POT.configButton:SetPoint("TOPRIGHT", browseFrame, "TOPRIGHT", -8, -32)
+    POT.configButton:SetText("")
+    local configIcon = POT.configButton:CreateTexture(nil, "ARTWORK")
+    configIcon:SetSize(14, 14)
+    configIcon:SetPoint("CENTER")
+    configIcon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+    POT.configButton:SetScript("OnClick", function() POT:ToggleConfigPopup() end)
+    POT.configButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Patron Order Tracker Settings", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    POT.configButton:SetScript("OnLeave", GameTooltip_Hide)
 
     POT.clearButton = CreateFrame("Button", nil, browseFrame, "UIPanelButtonTemplate")
     POT.clearButton:SetSize(210, 22)
@@ -278,14 +459,129 @@ function POT:InjectButtons()
 
     browseFrame:HookScript("OnHide", function()
         if POT.trackButton then POT.trackButton:Hide() end
+        if POT.configButton then POT.configButton:Hide() end
         if POT.clearButton then POT.clearButton:Hide() end
     end)
     browseFrame:HookScript("OnShow", function()
         POT:UpdateButtonState()
     end)
 
+    POT:HookOrderRows(browseFrame)
+
+    pcall(function()
+        Auctionator.API.v1.RegisterForDBUpdate(ADDON_NAME, function()
+            POT:RefreshCostOverlays()
+        end)
+    end)
+
     POT.initialized = true
     POT:UpdateButtonState()
+end
+
+-- ---------------------------------------------------------------------------
+-- Order row cost overlay
+-- ---------------------------------------------------------------------------
+
+local function FindNameCell(row)
+    for i = 1, row:GetNumChildren() do
+        local child = select(i, row:GetChildren())
+        if child.Icon then return child end
+    end
+end
+
+local function UpdateRowCostOverlay(row, elementData)
+    if not row.potCostText then
+        local nameCell = FindNameCell(row)
+        if not nameCell then
+            -- Cells not created yet; retry next frame via a throwaway timer frame
+            if not row.potRetryFrame then
+                row.potRetryFrame = CreateFrame("Frame")
+            end
+            row.potRetryFrame:SetScript("OnUpdate", function(self)
+                self:SetScript("OnUpdate", nil)
+                UpdateRowCostOverlay(row, elementData)
+            end)
+            return
+        end
+        row.potCostText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.potCostText:SetPoint("RIGHT", nameCell, "RIGHT", -4, 0)
+    end
+
+    if PatronOrderTrackerDB.showCostOverlay == false then
+        row.potCostText:Hide()
+        return
+    end
+
+    local order = elementData and elementData.option
+    if not order or order.orderType ~= Enum.CraftingOrderType.Npc then
+        row.potCostText:Hide()
+        return
+    end
+
+    local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
+    if not recipeInfo or not recipeInfo.learned then
+        row.potCostText:SetText("|cff888888(not learned)|r")
+        row.potCostText:Show()
+        return
+    end
+
+    local customerProvided = BuildCustomerProvidedMap(order)
+    local cost, hasMissing = POT:CalculateOrderCost(order.spellID, order.isRecraft, customerProvided)
+
+    if not cost and hasMissing then
+        row.potCostText:SetText("|cff888888No price data|r")
+        row.potCostText:Show()
+        return
+    end
+
+    local ceiling = PatronOrderTrackerDB.priceCeiling
+    local costStr = GetCoinTextureString(cost)
+    if ceiling then
+        if cost > ceiling then
+            row.potCostText:SetText("|cffff4444" .. costStr .. "|r")
+        else
+            row.potCostText:SetText("|cff00ff00" .. costStr .. "|r")
+        end
+    else
+        row.potCostText:SetText(costStr)
+    end
+    row.potCostText:Show()
+end
+
+function POT:RefreshCostOverlays()
+    local browseFrame = ProfessionsFrame and ProfessionsFrame.OrdersPage
+                        and ProfessionsFrame.OrdersPage.BrowseFrame
+    if not browseFrame or not browseFrame.OrderList or not browseFrame.OrderList.ScrollBox then return end
+    browseFrame.OrderList.ScrollBox:ForEachFrame(function(row)
+        if row.potCostText and row:GetElementData() then
+            UpdateRowCostOverlay(row, row:GetElementData())
+        end
+    end)
+end
+
+function POT:HookOrderRows(browseFrame)
+    local orderList = browseFrame.OrderList
+    if not orderList or not orderList.ScrollBox then return end
+
+    -- Hook via ScrollBox acquired-frame callback
+    local scrollBox = orderList.ScrollBox
+    if scrollBox.RegisterCallback and ScrollBoxListMixin and ScrollBoxListMixin.Event then
+        pcall(function()
+            scrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnAcquiredFrame, function(_, row, elementData)
+                UpdateRowCostOverlay(row, elementData)
+            end, POT)
+        end)
+        DebugMsg("Hooked order rows via ScrollBox callback")
+        return
+    end
+
+    -- Fallback: hook the row mixin Init directly
+    if ProfessionsCrafterOrderListElementMixin and ProfessionsCrafterOrderListElementMixin.Init then
+        hooksecurefunc(ProfessionsCrafterOrderListElementMixin, "Init", function(self, elementData)
+            UpdateRowCostOverlay(self, elementData)
+        end)
+        DebugMsg("Hooked order rows via mixin Init")
+    end
 end
 
 function POT:UpdateButtonState()
@@ -298,14 +594,21 @@ function POT:UpdateButtonState()
     if POT.trackButton then
         POT.trackButton:SetShown(isNpcTab and browseVisible)
     end
+    if POT.configButton then
+        POT.configButton:SetShown(isNpcTab and browseVisible)
+    end
     if POT.clearButton then
         local listExists = false
         if isNpcTab and browseVisible and Auctionator and Auctionator.Shopping then
             local profInfo = C_TradeSkillUI.GetChildProfessionInfo()
             local profName = profInfo and (profInfo.parentProfessionName or profInfo.professionName)
             if profName then
-                local name = "PatronOrderTracker - " .. profName
-                listExists = Auctionator.Shopping.ListManager:GetIndexForName(name) ~= nil
+                local playerName, playerRealm = UnitFullName("player")
+                local charName = playerName .. "-" .. (playerRealm or GetRealmName())
+                local profAbbr = PROF_ABBR[profName] or profName
+                local name = "POT - " .. profAbbr .. " (" .. charName .. ")"
+                local idx = Auctionator.Shopping.ListManager:GetIndexForName(name)
+                listExists = (idx and idx ~= false) and true or false
             end
         end
         POT.clearButton:SetShown(listExists)
@@ -341,11 +644,17 @@ function POT:ScanAndCreateList()
 
     local profInfo = C_TradeSkillUI.GetChildProfessionInfo()
     local profName = profInfo and (profInfo.parentProfessionName or profInfo.professionName) or "Unknown"
-    POT.shoppingListName = "PatronOrderTracker - " .. profName
+    local playerName, playerRealm = UnitFullName("player")
+    local charName = playerName .. "-" .. (playerRealm or GetRealmName())
+    local profAbbr = PROF_ABBR[profName] or profName
+    POT.shoppingListName = "POT - " .. profAbbr .. " (" .. charName .. ")"
 
     local scannedCount = 0
     local skippedCount = 0
+    local ceilingSkippedCount = 0
+    local missingPriceCount = 0
     local reagentTotals = {}
+    local ceiling = PatronOrderTrackerDB.priceCeiling
 
     if useBuckets then
         for i, bucket in ipairs(buckets) do
@@ -355,13 +664,26 @@ function POT:ScanAndCreateList()
                 tostring(recipeInfo and recipeInfo.learned),
                 tostring(bucket.numAvailable)))
             if recipeInfo and recipeInfo.learned then
-                POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
-                scannedCount = scannedCount + 1
+                if ceiling then
+                    local cost, hasMissing = POT:CalculateOrderCost(bucket.spellID, false, nil)
+                    if hasMissing then missingPriceCount = missingPriceCount + 1 end
+                    if cost and cost > ceiling then
+                        ceilingSkippedCount = ceilingSkippedCount + (bucket.numAvailable or 1)
+                        DebugMsg(string.format("  Bucket[%d]: cost %s exceeds ceiling, skipping %d orders",
+                            i, GetCoinTextureString(cost), bucket.numAvailable or 1))
+                    else
+                        POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
+                        scannedCount = scannedCount + 1
+                    end
+                else
+                    POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
+                    scannedCount = scannedCount + 1
+                end
             else
                 skippedCount = skippedCount + 1
             end
         end
-        PrintMsg("Note: Reagent counts are estimated (individual order details not loaded).")
+        PrintMsg("Estimated reagent counts. Individual order details not loaded.")
     else
         for i, order in ipairs(npcOrders) do
             local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
@@ -370,8 +692,22 @@ function POT:ScanAndCreateList()
                 i, tostring(order.spellID), tostring(learned),
                 tostring(order.isRecraft), order.reagents and #order.reagents or 0))
             if learned then
-                POT:CalculatePlayerReagents(order, reagentTotals)
-                scannedCount = scannedCount + 1
+                if ceiling then
+                    local customerProvided = BuildCustomerProvidedMap(order)
+                    local cost, hasMissing = POT:CalculateOrderCost(order.spellID, order.isRecraft, customerProvided)
+                    if hasMissing then missingPriceCount = missingPriceCount + 1 end
+                    if cost and cost > ceiling then
+                        ceilingSkippedCount = ceilingSkippedCount + 1
+                        DebugMsg(string.format("  Order[%d]: cost %s exceeds ceiling, skipping",
+                            i, GetCoinTextureString(cost)))
+                    else
+                        POT:CalculatePlayerReagents(order, reagentTotals)
+                        scannedCount = scannedCount + 1
+                    end
+                else
+                    POT:CalculatePlayerReagents(order, reagentTotals)
+                    scannedCount = scannedCount + 1
+                end
             else
                 skippedCount = skippedCount + 1
             end
@@ -379,11 +715,22 @@ function POT:ScanAndCreateList()
     end
 
     if scannedCount == 0 then
-        PrintMsg("No fulfillable patron orders found.")
+        if ceilingSkippedCount > 0 and skippedCount == 0 then
+            PrintMsg(string.format("No shopping list created. All orders cost more than the %s order budget.",
+                GetCoinTextureString(PatronOrderTrackerDB.priceCeiling)))
+        elseif skippedCount > 0 and ceilingSkippedCount == 0 then
+            PrintMsg("No shopping list created. All recipes are unlearned.")
+        elseif skippedCount > 0 and ceilingSkippedCount > 0 then
+            PrintMsg(string.format("No shopping list created. %d for unlearned recipes, %d over the %s order budget.",
+                skippedCount, ceilingSkippedCount,
+                GetCoinTextureString(PatronOrderTrackerDB.priceCeiling)))
+        else
+            PrintMsg("No shopping list created. No fulfillable patron orders found.")
+        end
         return
     end
 
-    POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount)
+    POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceilingSkippedCount, missingPriceCount)
     POT:UpdateButtonState()
 end
 
@@ -395,14 +742,7 @@ function POT:CalculatePlayerReagents(order, totals)
     local schematic = C_TradeSkillUI.GetRecipeSchematic(order.spellID, order.isRecraft)
     if not schematic or not schematic.reagentSlotSchematics then return end
 
-    local customerProvided = {}
-    if order.reagents then
-        for _, orderReagent in ipairs(order.reagents) do
-            local slot = orderReagent.slotIndex
-            local qty = orderReagent.reagentInfo and orderReagent.reagentInfo.quantity or 0
-            customerProvided[slot] = (customerProvided[slot] or 0) + qty
-        end
-    end
+    local customerProvided = BuildCustomerProvidedMap(order)
 
     for _, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
         if slotSchematic.reagentType == Enum.CraftingReagentType.Basic
@@ -442,31 +782,71 @@ function POT:CalculateSchematicReagents(spellID, isRecraft, orderCount, totals)
 end
 
 -- ---------------------------------------------------------------------------
+-- Per-order cost calculation (for ceiling filter)
+-- ---------------------------------------------------------------------------
+
+function POT:CalculateOrderCost(spellID, isRecraft, customerProvided)
+    local schematic = C_TradeSkillUI.GetRecipeSchematic(spellID, isRecraft)
+    if not schematic or not schematic.reagentSlotSchematics then return nil, true end
+
+    local totalCost = 0
+    local hasMissingPrices = false
+
+    for _, slotSchematic in ipairs(schematic.reagentSlotSchematics) do
+        if slotSchematic.reagentType == Enum.CraftingReagentType.Basic
+           and slotSchematic.required
+           and slotSchematic.quantityRequired > 0 then
+
+            local playerNeeds = slotSchematic.quantityRequired
+            if customerProvided then
+                playerNeeds = playerNeeds - (customerProvided[slotSchematic.slotIndex] or 0)
+            end
+
+            if playerNeeds > 0 then
+                local itemID = slotSchematic.reagents and slotSchematic.reagents[1] and slotSchematic.reagents[1].itemID
+                if itemID then
+                    local price = Auctionator.API.v1.GetAuctionPriceByItemID(ADDON_NAME, itemID)
+                    if price then
+                        totalCost = totalCost + (price * playerNeeds)
+                    else
+                        hasMissingPrices = true
+                    end
+                end
+            end
+        end
+    end
+
+    return totalCost, hasMissingPrices
+end
+
+-- ---------------------------------------------------------------------------
 -- Auctionator shopping list
 -- ---------------------------------------------------------------------------
 
-local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppingList)
-    local msg = string.format("Scanned %d patron order%s", scannedCount, scannedCount == 1 and "" or "s")
+local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppingList, ceilingSkippedCount, missingPriceCount)
+    PrintMsg(string.format("Scanned %d patron order%s.", scannedCount, scannedCount == 1 and "" or "s"))
     if hasShoppingList and reagentCount > 0 then
-        msg = msg .. string.format(" · %d reagent%s added to shopping list",
-            reagentCount, reagentCount == 1 and "" or "s")
+        PrintMsg(string.format("Added %d reagent%s to shopping list.",
+            reagentCount, reagentCount == 1 and "" or "s"))
     end
-    PrintMsg(msg)
     if skippedCount > 0 then
-        PrintMsg(string.format("Skipped %d order%s (recipe not learned).", skippedCount, skippedCount == 1 and "" or "s"))
+        PrintMsg(string.format("Skipped %d order%s for recipes you haven't learned.", skippedCount, skippedCount == 1 and "" or "s"))
+    end
+    if ceilingSkippedCount and ceilingSkippedCount > 0 then
+        PrintMsg(string.format("Skipped %d order%s over the order budget (%s).",
+            ceilingSkippedCount, ceilingSkippedCount == 1 and "" or "s",
+            GetCoinTextureString(PatronOrderTrackerDB.priceCeiling)))
+    end
+    if missingPriceCount and missingPriceCount > 0 then
+        PrintMsg(string.format("|cffff8800Warning:|r %d order%s had no price data. Included anyway. Try scanning the AH.",
+            missingPriceCount, missingPriceCount == 1 and "" or "s"))
     end
 end
 
-function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount)
+function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceilingSkippedCount, missingPriceCount)
     local totalReagentCount = 0
     for _, count in pairs(reagentTotals) do
         totalReagentCount = totalReagentCount + count
-    end
-
-    if not Auctionator or not Auctionator.API or not Auctionator.API.v1 then
-        PrintSummary(scannedCount, skippedCount, totalReagentCount, false)
-        PrintMsg("Auctionator not detected - no shopping list created.")
-        return
     end
 
     local pendingItems = {}
@@ -475,7 +855,7 @@ function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount)
     end
 
     if #pendingItems == 0 then
-        PrintSummary(scannedCount, skippedCount, 0, false)
+        PrintSummary(scannedCount, skippedCount, 0, false, ceilingSkippedCount, missingPriceCount)
         return
     end
 
@@ -500,10 +880,11 @@ function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount)
 
         if #searchStrings > 0 then
             Auctionator.API.v1.CreateShoppingList(ADDON_NAME, POT.shoppingListName, searchStrings)
-            PrintSummary(scannedCount, skippedCount, totalReagentCount, true)
+            PrintSummary(scannedCount, skippedCount, totalReagentCount, true, ceilingSkippedCount, missingPriceCount)
+            PrintMsg("Created shopping list: " .. POT.shoppingListName)
         else
-            PrintSummary(scannedCount, skippedCount, 0, false)
-            PrintMsg("No player-supplied reagents needed (customers provided everything).")
+            PrintSummary(scannedCount, skippedCount, 0, false, ceilingSkippedCount, missingPriceCount)
+            PrintMsg("No player-supplied reagents needed. Customers provided everything.")
         end
     end)
 end
@@ -513,11 +894,6 @@ end
 -- ---------------------------------------------------------------------------
 
 function POT:ClearShoppingList()
-    if not POT.shoppingListName then
-        PrintMsg("Nothing to clear.")
-        return
-    end
-
     if Auctionator and Auctionator.Shopping then
         pcall(function()
             local listIndex = Auctionator.Shopping.ListManager:GetIndexForName(POT.shoppingListName)
@@ -527,7 +903,7 @@ function POT:ClearShoppingList()
         end)
     end
 
-    PrintMsg("Removed shopping list: " .. POT.shoppingListName)
+    PrintMsg("Cleared the Auctionator shopping list.")
     POT.shoppingListName = nil
     POT:UpdateButtonState()
 end

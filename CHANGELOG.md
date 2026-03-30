@@ -1,3 +1,13 @@
+## 1.1.0
+
+- **Order budget**: Set a max material spend per order. Orders that cost more are automatically excluded from the shopping list. Prices are pulled from Auctionator.
+- **Settings dialog**: Gear button next to "Create" opens a config popup to set your order budget
+- **Inline cost preview**: Each order in the Patron Orders list now shows its estimated material cost. Color-coded green/red when an order budget is set.
+- **Per-character shopping lists**: Lists now include your character name (e.g. "POT - JC (Name-Realm)") so they don't collide across alts
+- **Shortened list names**: Profession abbreviations (JC, BS, LW, etc.) keep Auctionator's shopping list panel clean
+- Improved dialog styling to match WoW's native UI
+- Cleaner, more consistent chat output messaging
+
 ## 1.0.8
 
 - Added support for multiple Interface versions (120005, 120001, 120000) to cover live, launch, and PTR
