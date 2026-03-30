@@ -1,3 +1,7 @@
+## 1.0.8
+
+- Added support for multiple Interface versions (120005, 120001, 120000) to cover live, launch, and PTR
+
 ## 1.0.7
 
 - Fixed incorrect Interface version (120005 → 120001) that caused the addon to show as "Incompatible"
