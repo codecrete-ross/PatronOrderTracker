@@ -62,6 +62,10 @@ Never push, tag, or release untested changes. Copy to the WoW folder and stop �
 - No recipe tracking (SetRecipeTracked) — removed in v1.0.1, the addon focuses purely on the Auctionator shopping list.
 - No SavedVariables — clear button checks Auctionator's live state directly via ListManager:GetIndexForName.
 
+## Changelog Style
+
+Changelog entries must be written for end users, not developers. Use plain language that describes what changed from the user's perspective. No technical jargon, internal function names, or implementation details. Focus on what the user will notice.
+
 ## Publishing
 
 - GitHub: https://github.com/codecrete-ross/PatronOrderTracker

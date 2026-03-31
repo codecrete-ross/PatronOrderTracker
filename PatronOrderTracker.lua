@@ -8,6 +8,7 @@ POT.configButton = nil
 POT.configFrame = nil
 POT.initialized = false
 POT.debug = false
+POT.learnedRecipes = {}
 
 -- ---------------------------------------------------------------------------
 -- Event bootstrap
@@ -24,8 +25,19 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
             eventFrame:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED")
         end
     elseif event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
+        POT.learnedRecipes = {}
+        local allRecipeIDs = C_TradeSkillUI.GetAllRecipeIDs()
+        if allRecipeIDs then
+            for _, recipeID in ipairs(allRecipeIDs) do
+                local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
+                if info and info.learned then
+                    POT.learnedRecipes[recipeID] = true
+                end
+            end
+        end
         if ProfessionsFrame and ProfessionsFrame.OrdersPage then
             POT:InjectButtons()
+            POT:RefreshCostOverlays()
         end
     end
 end)
@@ -518,8 +530,7 @@ local function UpdateRowCostOverlay(row, elementData)
         return
     end
 
-    local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
-    if not recipeInfo or not recipeInfo.learned then
+    if not POT.learnedRecipes[order.spellID] then
         row.potCostText:SetText("|cff888888(not learned)|r")
         row.potCostText:Show()
         return

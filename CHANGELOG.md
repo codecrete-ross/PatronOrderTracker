@@ -1,3 +1,8 @@
+## 1.1.1
+
+- Fixed material costs not appearing on some orders in the order list
+- Fixed some learned recipes incorrectly showing as "not learned"
+
 ## 1.1.0
 
 - **Order budget**: Set a max material spend per order. Orders that cost more are automatically excluded from the shopping list. Prices are pulled from Auctionator.
