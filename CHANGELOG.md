@@ -1,3 +1,7 @@
+## 1.1.2
+
+- Fixed cost overlays swapping between orders when switching crafting order tabs
+
 ## 1.1.1
 
 - Fixed material costs not appearing on some orders in the order list

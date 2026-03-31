@@ -8,7 +8,6 @@ POT.configButton = nil
 POT.configFrame = nil
 POT.initialized = false
 POT.debug = false
-POT.learnedRecipes = {}
 
 -- ---------------------------------------------------------------------------
 -- Event bootstrap
@@ -23,22 +22,14 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
             eventFrame:UnregisterEvent("ADDON_LOADED")
             if not PatronOrderTrackerDB then PatronOrderTrackerDB = {} end
             eventFrame:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED")
+            eventFrame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
         end
     elseif event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
-        POT.learnedRecipes = {}
-        local allRecipeIDs = C_TradeSkillUI.GetAllRecipeIDs()
-        if allRecipeIDs then
-            for _, recipeID in ipairs(allRecipeIDs) do
-                local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
-                if info and info.learned then
-                    POT.learnedRecipes[recipeID] = true
-                end
-            end
-        end
         if ProfessionsFrame and ProfessionsFrame.OrdersPage then
             POT:InjectButtons()
-            POT:RefreshCostOverlays()
         end
+    elseif event == "TRADE_SKILL_LIST_UPDATE" then
+        POT:RefreshCostOverlays()
     end
 end)
 
@@ -254,6 +245,54 @@ function POT:BuildDumpString()
         add("Shopping list: " .. POT.shoppingListName)
     end
 
+    add("")
+    add("=== Visible Row UI State ===")
+    local browseFrame = ProfessionsFrame and ProfessionsFrame.OrdersPage
+                        and ProfessionsFrame.OrdersPage.BrowseFrame
+    if browseFrame and browseFrame.OrderList and browseFrame.OrderList.ScrollBox then
+        local rowIdx = 0
+        browseFrame.OrderList.ScrollBox:ForEachFrame(function(row)
+            rowIdx = rowIdx + 1
+            -- Read what's actually rendered in the name cell
+            local nameCell = nil
+            local nameCellText = "(no name cell)"
+            for i = 1, row:GetNumChildren() do
+                local child = select(i, row:GetChildren())
+                if child.Icon then
+                    nameCell = child
+                    -- Find the text widget inside the name cell
+                    for j = 1, child:GetNumRegions() do
+                        local region = select(j, child:GetRegions())
+                        if region.GetText and region:GetText() then
+                            nameCellText = region:GetText()
+                            break
+                        end
+                    end
+                    break
+                end
+            end
+
+            -- Read elementData
+            local ed = row:GetElementData()
+            local order = ed and ed.option
+            local edItemName = order and C_Item.GetItemNameByID(order.itemID) or "(no elementData)"
+
+            add(string.format("Row %d:", rowIdx))
+            add(string.format("  Name cell renders: %s", nameCellText))
+            add(string.format("  elementData says:  %s", edItemName))
+            if order then
+                add(string.format("  order.spellID: %s", tostring(order.spellID)))
+                local ri = C_TradeSkillUI.GetRecipeInfo(order.spellID)
+                add(string.format("  GetRecipeInfo now: learned=%s", ri and tostring(ri.learned) or "nil"))
+            end
+            add(string.format("  overlay text: %s", row.potCostText and row.potCostText:GetText() or "(none)"))
+            add(string.format("  overlay shown: %s", row.potCostText and tostring(row.potCostText:IsShown()) or "N/A"))
+            add("")
+        end)
+    else
+        add("ScrollBox not available")
+    end
+
     return table.concat(lines, "\n")
 end
 
@@ -467,6 +506,7 @@ function POT:InjectButtons()
 
     hooksecurefunc(ProfessionsFrame.OrdersPage, "SetCraftingOrderType", function()
         POT:UpdateButtonState()
+        POT:RefreshCostOverlays()
     end)
 
     browseFrame:HookScript("OnHide", function()
@@ -502,22 +542,22 @@ local function FindNameCell(row)
 end
 
 local function UpdateRowCostOverlay(row, elementData)
-    if not row.potCostText then
-        local nameCell = FindNameCell(row)
-        if not nameCell then
-            -- Cells not created yet; retry next frame via a throwaway timer frame
-            if not row.potRetryFrame then
-                row.potRetryFrame = CreateFrame("Frame")
-            end
-            row.potRetryFrame:SetScript("OnUpdate", function(self)
-                self:SetScript("OnUpdate", nil)
-                UpdateRowCostOverlay(row, elementData)
-            end)
-            return
+    local nameCell = FindNameCell(row)
+    if not nameCell then
+        if not row.potRetryFrame then
+            row.potRetryFrame = CreateFrame("Frame")
         end
-        row.potCostText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.potCostText:SetPoint("RIGHT", nameCell, "RIGHT", -4, 0)
+        row.potRetryFrame:SetScript("OnUpdate", function(self)
+            self:SetScript("OnUpdate", nil)
+            UpdateRowCostOverlay(row, elementData)
+        end)
+        return
     end
+    if not row.potCostText then
+        row.potCostText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    end
+    row.potCostText:ClearAllPoints()
+    row.potCostText:SetPoint("RIGHT", nameCell, "RIGHT", -4, 0)
 
     if PatronOrderTrackerDB.showCostOverlay == false then
         row.potCostText:Hide()
@@ -530,7 +570,12 @@ local function UpdateRowCostOverlay(row, elementData)
         return
     end
 
-    if not POT.learnedRecipes[order.spellID] then
+    local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
+    if not recipeInfo then
+        row.potCostText:Hide()
+        return
+    end
+    if not recipeInfo.learned then
         row.potCostText:SetText("|cff888888(not learned)|r")
         row.potCostText:Show()
         return
@@ -583,10 +628,9 @@ function POT:HookOrderRows(browseFrame)
             end, POT)
         end)
         DebugMsg("Hooked order rows via ScrollBox callback")
-        return
     end
 
-    -- Fallback: hook the row mixin Init directly
+    -- Also hook Init for in-place row data updates (tab switches, recycling)
     if ProfessionsCrafterOrderListElementMixin and ProfessionsCrafterOrderListElementMixin.Init then
         hooksecurefunc(ProfessionsCrafterOrderListElementMixin, "Init", function(self, elementData)
             UpdateRowCostOverlay(self, elementData)
