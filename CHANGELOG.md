@@ -1,3 +1,8 @@
+## 1.1.3
+
+- Fixed cost overlays not appearing on first open of the crafting orders page
+- Fixed overlays disappearing from some rows after tab switches or list refreshes
+
 ## 1.1.2
 
 - Fixed cost overlays swapping between orders when switching crafting order tabs

@@ -2,7 +2,7 @@
 ## Title: Patron Order Tracker
 ## Notes: One-click Auctionator shopping list creation for all fulfillable Patron Orders. Only includes the reagents you need to supply.
 ## Author: Codecrete
-## Version: 1.1.2
+## Version: 1.1.3
 ## Category-enUS: Professions
 ## IconTexture: Interface\AddOns\PatronOrderTracker\logo
 ## OptionalDeps: Auctionator

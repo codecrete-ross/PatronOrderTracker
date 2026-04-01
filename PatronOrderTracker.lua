@@ -543,38 +543,22 @@ end
 
 local function UpdateRowCostOverlay(row, elementData)
     local nameCell = FindNameCell(row)
-    if not nameCell then
-        if not row.potRetryFrame then
-            row.potRetryFrame = CreateFrame("Frame")
-        end
-        row.potRetryFrame:SetScript("OnUpdate", function(self)
-            self:SetScript("OnUpdate", nil)
-            UpdateRowCostOverlay(row, elementData)
-        end)
-        return
-    end
+    if not nameCell then return end
+
     if not row.potCostText then
         row.potCostText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     end
     row.potCostText:ClearAllPoints()
     row.potCostText:SetPoint("RIGHT", nameCell, "RIGHT", -4, 0)
+    row.potCostText:Hide()
 
-    if PatronOrderTrackerDB.showCostOverlay == false then
-        row.potCostText:Hide()
-        return
-    end
+    if PatronOrderTrackerDB.showCostOverlay == false then return end
 
     local order = elementData and elementData.option
-    if not order or order.orderType ~= Enum.CraftingOrderType.Npc then
-        row.potCostText:Hide()
-        return
-    end
+    if not order or order.orderType ~= Enum.CraftingOrderType.Npc then return end
 
     local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
-    if not recipeInfo then
-        row.potCostText:Hide()
-        return
-    end
+    if not recipeInfo then return end
     if not recipeInfo.learned then
         row.potCostText:SetText("|cff888888(not learned)|r")
         row.potCostText:Show()
@@ -609,8 +593,9 @@ function POT:RefreshCostOverlays()
                         and ProfessionsFrame.OrdersPage.BrowseFrame
     if not browseFrame or not browseFrame.OrderList or not browseFrame.OrderList.ScrollBox then return end
     browseFrame.OrderList.ScrollBox:ForEachFrame(function(row)
-        if row.potCostText and row:GetElementData() then
-            UpdateRowCostOverlay(row, row:GetElementData())
+        local elementData = row.GetElementData and row:GetElementData()
+        if elementData then
+            UpdateRowCostOverlay(row, elementData)
         end
     end)
 end
@@ -618,19 +603,28 @@ end
 function POT:HookOrderRows(browseFrame)
     local orderList = browseFrame.OrderList
     if not orderList or not orderList.ScrollBox then return end
-
-    -- Hook via ScrollBox acquired-frame callback
     local scrollBox = orderList.ScrollBox
+
+    -- OnAcquiredFrame: fires when ScrollBox takes a frame from pool (before Init).
+    -- Hides stale overlay, then defers update to next frame so Init has run first.
+    -- Uses GetElementData() for current data instead of capturing stale closure data.
     if scrollBox.RegisterCallback and ScrollBoxListMixin and ScrollBoxListMixin.Event then
         pcall(function()
-            scrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnAcquiredFrame, function(_, row, elementData)
-                UpdateRowCostOverlay(row, elementData)
+            scrollBox:RegisterCallback(ScrollBoxListMixin.Event.OnAcquiredFrame, function(_, row)
+                if row.potCostText then row.potCostText:Hide() end
+                C_Timer.After(0, function()
+                    local currentData = row.GetElementData and row:GetElementData()
+                    if currentData then
+                        UpdateRowCostOverlay(row, currentData)
+                    end
+                end)
             end, POT)
         end)
         DebugMsg("Hooked order rows via ScrollBox callback")
     end
 
-    -- Also hook Init for in-place row data updates (tab switches, recycling)
+    -- Init hook: fires after Blizzard populates row children, so FindNameCell succeeds.
+    -- Primary path on second+ loads; may not exist on first load (mixin lazy-loaded).
     if ProfessionsCrafterOrderListElementMixin and ProfessionsCrafterOrderListElementMixin.Init then
         hooksecurefunc(ProfessionsCrafterOrderListElementMixin, "Init", function(self, elementData)
             UpdateRowCostOverlay(self, elementData)
