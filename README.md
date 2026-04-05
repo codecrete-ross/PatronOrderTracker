@@ -11,6 +11,7 @@ A single button on the Patron Orders tab that scans every loaded order for your 
 ## Features
 
 - **One-click shopping list** from all fulfillable Patron Orders
+- **Reward filters** to include only orders with specific rewards — knowledge points, Artisan's Moxie, or Augment Runes
 - **Order budget** to automatically skip orders that cost more than you want to spend
 - **Inline cost preview** on each order row, using Auctionator's price data
 
@@ -18,11 +19,10 @@ A single button on the Patron Orders tab that scans every loaded order for your 
 
 1. Open **Crafting Orders** > **Patron** at your profession's crafting table
 2. Wait for orders to load. You'll see estimated material costs on each order
-3. (Optional) Click the **gear button** to set an order budget — orders over this cost will be skipped
-4. Click **"Create Auctionator Shopping List"**
-5. Open the Auction House and open the **Shopping** tab in Auctionator
-6. Select your shopping list: **"POT - LW (Bigcatross-Area52)"**
-7. Click **"Clear Auctionator Shopping List"** when you're done
+3. Click **"Create Auctionator Shopping List"**
+4. Open the Auction House and open the **Shopping** tab in Auctionator
+5. Select your shopping list: **"POT - LW (Bigcatross-Area52)"**
+6. Click **"Clear Auctionator Shopping List"** when you're done
 
 ## Requirements
 

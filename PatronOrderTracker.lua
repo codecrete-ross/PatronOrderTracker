@@ -8,6 +8,18 @@ POT.configButton = nil
 POT.configFrame = nil
 POT.initialized = false
 POT.debug = false
+POT.currentVersion = nil
+POT.showWhatsNew = false
+
+local WHATS_NEW = [[
+Version 1.2.0
+
+|cffffffffReward Filters|r
+- Choose which patron order rewards to include in your shopping list: Knowledge Points, Artisan's Moxie, or Augment Runes. Open settings to configure.
+
+|cffffffffFree Order Indicator|r
+- Orders where the customer provides all reagents now show "|cff00ff00(free)|r" in the order list.
+]]
 
 -- ---------------------------------------------------------------------------
 -- Event bootstrap
@@ -21,6 +33,24 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         if addon == ADDON_NAME then
             eventFrame:UnregisterEvent("ADDON_LOADED")
             if not PatronOrderTrackerDB then PatronOrderTrackerDB = {} end
+            -- Migrate knowledgeOnly → rewardFilter
+            if PatronOrderTrackerDB.knowledgeOnly ~= nil then
+                if PatronOrderTrackerDB.knowledgeOnly then
+                    PatronOrderTrackerDB.rewardFilter = { knowledge = true, moxie = false, augmentRune = false }
+                end
+                PatronOrderTrackerDB.knowledgeOnly = nil
+            end
+            if not PatronOrderTrackerDB.rewardFilter then
+                PatronOrderTrackerDB.rewardFilter = { knowledge = true, moxie = true, augmentRune = true }
+            end
+            -- What's New version tracking
+            POT.currentVersion = C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")
+            if not PatronOrderTrackerDB.lastSeenVersion then
+                -- First install — don't show What's New
+                PatronOrderTrackerDB.lastSeenVersion = POT.currentVersion
+            elseif PatronOrderTrackerDB.lastSeenVersion ~= POT.currentVersion then
+                POT.showWhatsNew = true
+            end
             eventFrame:RegisterEvent("TRADE_SKILL_DATA_SOURCE_CHANGED")
             eventFrame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
         end
@@ -56,6 +86,97 @@ local function BuildCustomerProvidedMap(order)
         end
     end
     return map
+end
+
+local function GetItemIDFromLink(itemLink)
+    if not itemLink then return nil end
+    return tonumber(itemLink:match("item:(%d+)"))
+end
+
+local function GetRewardName(reward)
+    if not reward.itemLink then return nil end
+    local name = reward.itemLink:match("|h%[(.-)%]|h")
+    if not name or name == "" then
+        local id = GetItemIDFromLink(reward.itemLink)
+        if id then name = C_Item.GetItemNameByID(id) end
+    end
+    return name
+end
+
+-- ---------------------------------------------------------------------------
+-- Reward data tables
+-- ---------------------------------------------------------------------------
+
+local PROF_GLIMMER_ITEMS = {
+    Alchemy = 246321, Blacksmithing = 246323, Enchanting = 246325,
+    Engineering = 246327, Inscription = 246329, Jewelcrafting = 246331,
+    Leatherworking = 246333, Tailoring = 246335,
+}
+
+local PROF_FLICKER_ITEMS = {
+    Alchemy = 246320, Blacksmithing = 246322, Enchanting = 246324,
+    Engineering = 246326, Inscription = 246328, Jewelcrafting = 246330,
+    Leatherworking = 246332, Tailoring = 246334,
+}
+
+local PROF_MOXIE_CURRENCIES = {
+    Alchemy = 3256, Blacksmithing = 3257, Enchanting = 3258,
+    Engineering = 3259, Inscription = 3261, Jewelcrafting = 3262,
+    Leatherworking = 3263, Tailoring = 3266,
+}
+
+local MOXIE_CURRENCY_SET = {}
+for _, id in pairs(PROF_MOXIE_CURRENCIES) do MOXIE_CURRENCY_SET[id] = true end
+
+local AUGMENT_RUNE_ITEM_ID = 259085
+
+-- ---------------------------------------------------------------------------
+-- Reward detection helpers
+-- ---------------------------------------------------------------------------
+
+local function OrderHasRewardType(order, rewardType)
+    if not order.npcOrderRewards then return false end
+    for _, reward in ipairs(order.npcOrderRewards) do
+        if rewardType == "knowledge" then
+            local name = GetRewardName(reward)
+            if name and name:find("Knowledge") then return true end
+        elseif rewardType == "moxie" then
+            if reward.currencyType and MOXIE_CURRENCY_SET[reward.currencyType] then return true end
+        elseif rewardType == "augmentRune" then
+            local name = GetRewardName(reward)
+            if name and name:find("Augment Rune") then return true end
+        end
+    end
+    return false
+end
+
+local function OrderMatchesRewardFilter(order)
+    local rf = PatronOrderTrackerDB.rewardFilter
+    if not rf then return true end
+    if rf.knowledge and OrderHasRewardType(order, "knowledge") then return true end
+    if rf.moxie and OrderHasRewardType(order, "moxie") then return true end
+    if rf.augmentRune and OrderHasRewardType(order, "augmentRune") then return true end
+    return false
+end
+
+local function OrderNeedsShopping(order)
+    local schematic = C_TradeSkillUI.GetRecipeSchematic(order.spellID, order.isRecraft)
+    if not schematic or not schematic.reagentSlotSchematics then return true end
+    local customerProvided = BuildCustomerProvidedMap(order)
+    for _, slot in ipairs(schematic.reagentSlotSchematics) do
+        if slot.reagentType == Enum.CraftingReagentType.Basic
+           and slot.required and slot.quantityRequired > 0 then
+            local playerNeeds = slot.quantityRequired - (customerProvided[slot.slotIndex] or 0)
+            if playerNeeds > 0 then return true end
+        end
+    end
+    return false
+end
+
+local function RewardFilterNeedsCheck()
+    local rf = PatronOrderTrackerDB.rewardFilter
+    if not rf then return false end
+    return rf.knowledge or rf.moxie or rf.augmentRune or false
 end
 
 local PROF_ABBR = {
@@ -194,6 +315,24 @@ function POT:BuildDumpString()
             add("Reagent State: " .. (REAGENT_STATE_NAMES[order.reagentState] or tostring(order.reagentState)))
             add("isRecraft: " .. tostring(order.isRecraft))
 
+            if order.npcOrderRewards and #order.npcOrderRewards > 0 then
+                add("Rewards:")
+                for _, reward in ipairs(order.npcOrderRewards) do
+                    if reward.itemLink then
+                        local name = GetRewardName(reward)
+                        if not name or name == "" then
+                            local id = GetItemIDFromLink(reward.itemLink)
+                            name = id and ("itemID:" .. id) or reward.itemLink
+                        end
+                        add(string.format("  %s x%d", name, reward.count or 1))
+                    elseif reward.currencyType then
+                        add(string.format("  CurrencyType %d x%d", reward.currencyType, reward.count or 1))
+                    end
+                end
+            else
+                add("Rewards: (none)")
+            end
+
             local schematic = C_TradeSkillUI.GetRecipeSchematic(order.spellID, order.isRecraft)
             if schematic and schematic.reagentSlotSchematics then
                 local customerProvided = BuildCustomerProvidedMap(order)
@@ -320,15 +459,9 @@ end
 function POT:CreateConfigPopup()
     if POT.configFrame then return end
 
-    local f = CreateFrame("Frame", "PatronOrderTrackerConfigFrame", UIParent, "BackdropTemplate")
-    f:SetSize(300, 225)
+    local f = CreateFrame("Frame", "PatronOrderTrackerConfigFrame", UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(360, 305)
     f:SetPoint("CENTER")
-    f:SetBackdrop({
-        bgFile = "Interface/DialogFrame/UI-DialogBox-Background",
-        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -345,20 +478,15 @@ function POT:CreateConfigPopup()
         end
     end)
 
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -16)
-    title:SetText("Patron Order Tracker Settings")
-
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -4, -4)
+    f.TitleText:SetText("Patron Order Tracker Settings")
 
     local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("TOPLEFT", 20, -50)
+    label:SetPoint("TOPLEFT", f.InsetBg, "TOPLEFT", 10, -10)
     label:SetText("Order budget:")
 
     local input = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
     input:SetSize(100, 20)
-    input:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 4, -8)
+    input:SetPoint("LEFT", label, "RIGHT", 10, 0)
     input:SetAutoFocus(false)
     input:SetMaxLetters(10)
     input:SetNumeric(true)
@@ -380,8 +508,8 @@ function POT:CreateConfigPopup()
     end)
 
     local help = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    help:SetPoint("TOPLEFT", input, "BOTTOMLEFT", -4, -12)
-    help:SetPoint("RIGHT", f, "RIGHT", -20, 0)
+    help:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -12)
+    help:SetPoint("RIGHT", f.InsetBg, "RIGHT", -10, 0)
     help:SetJustifyH("LEFT")
     help:SetText("|cff888888Orders that cost more than this will be excluded.\nRequires a recent AH scan for accurate prices.|r")
 
@@ -395,9 +523,115 @@ function POT:CreateConfigPopup()
         POT:RefreshCostOverlays()
     end)
 
+    -- Reward filter section
+    local function CreateRewardIcon(parent, anchor, offsetX)
+        local btn = CreateFrame("Button", nil, parent)
+        btn:SetSize(16, 16)
+        btn:SetPoint("LEFT", anchor, "RIGHT", offsetX, 0)
+        btn.tex = btn:CreateTexture(nil, "ARTWORK")
+        btn.tex:SetAllPoints()
+        btn:SetScript("OnEnter", function(self)
+            if self.tooltipItemID then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetItemByID(self.tooltipItemID)
+                GameTooltip:Show()
+            elseif self.tooltipCurrencyID then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetCurrencyByID(self.tooltipCurrencyID)
+                GameTooltip:Show()
+            end
+        end)
+        btn:SetScript("OnLeave", GameTooltip_Hide)
+        return btn
+    end
+
+    -- Parent reward checkbox (tri-state)
+    local rewardParentCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    rewardParentCheck:SetPoint("TOPLEFT", showCostsCheck, "BOTTOMLEFT", 0, -2)
+    rewardParentCheck.text = rewardParentCheck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    rewardParentCheck.text:SetPoint("LEFT", rewardParentCheck, "RIGHT", 2, 0)
+    rewardParentCheck.text:SetText("Only include orders with these rewards:")
+
+    -- Knowledge row (indented)
+    local knowledgeCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    knowledgeCheck:SetPoint("TOPLEFT", rewardParentCheck, "BOTTOMLEFT", 26, -2)
+    local glimmerIcon = CreateRewardIcon(f, knowledgeCheck, 2)
+    local flickerIcon = CreateRewardIcon(f, glimmerIcon, 2)
+    knowledgeCheck.text = knowledgeCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    knowledgeCheck.text:SetPoint("LEFT", flickerIcon, "RIGHT", 4, 0)
+    knowledgeCheck.text:SetText("Knowledge points")
+
+    -- Moxie row (indented)
+    local moxieCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    moxieCheck:SetPoint("TOPLEFT", knowledgeCheck, "BOTTOMLEFT", 0, -2)
+    local moxieIcon = CreateRewardIcon(f, moxieCheck, 2)
+    moxieCheck.text = moxieCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    moxieCheck.text:SetPoint("LEFT", moxieIcon, "RIGHT", 4, 0)
+    moxieCheck.text:SetText("Artisan's Moxie")
+
+    -- Augment Rune row (indented)
+    local runeCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    runeCheck:SetPoint("TOPLEFT", moxieCheck, "BOTTOMLEFT", 0, -2)
+    local runeIcon = CreateRewardIcon(f, runeCheck, 2)
+    runeCheck.text = runeCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    runeCheck.text:SetPoint("LEFT", runeIcon, "RIGHT", 4, 0)
+    runeCheck.text:SetText("Augment Runes")
+
+    -- Update parent checkbox tri-state to reflect children
+    local function UpdateRewardFilterUI()
+        local rf = PatronOrderTrackerDB.rewardFilter
+        local anyOn = rf.knowledge or rf.moxie or rf.augmentRune
+        local allOn = rf.knowledge and rf.moxie and rf.augmentRune
+
+        if anyOn then
+            rewardParentCheck:SetChecked(true)
+            rewardParentCheck:GetCheckedTexture():SetDesaturated(not allOn)
+        else
+            rewardParentCheck:SetChecked(false)
+        end
+    end
+
+    rewardParentCheck:SetScript("OnClick", function(self)
+        local rf = PatronOrderTrackerDB.rewardFilter
+        if self:GetChecked() then
+            -- Turning on: check all children
+            rf.knowledge = true
+            rf.moxie = true
+            rf.augmentRune = true
+            knowledgeCheck:SetChecked(true)
+            moxieCheck:SetChecked(true)
+            runeCheck:SetChecked(true)
+        else
+            -- Turning off: uncheck all children
+            rf.knowledge = false
+            rf.moxie = false
+            rf.augmentRune = false
+            knowledgeCheck:SetChecked(false)
+            moxieCheck:SetChecked(false)
+            runeCheck:SetChecked(false)
+        end
+        UpdateRewardFilterUI()
+        POT:RefreshCostOverlays()
+    end)
+    knowledgeCheck:SetScript("OnClick", function(self)
+        PatronOrderTrackerDB.rewardFilter.knowledge = self:GetChecked()
+        UpdateRewardFilterUI()
+        POT:RefreshCostOverlays()
+    end)
+    moxieCheck:SetScript("OnClick", function(self)
+        PatronOrderTrackerDB.rewardFilter.moxie = self:GetChecked()
+        UpdateRewardFilterUI()
+        POT:RefreshCostOverlays()
+    end)
+    runeCheck:SetScript("OnClick", function(self)
+        PatronOrderTrackerDB.rewardFilter.augmentRune = self:GetChecked()
+        UpdateRewardFilterUI()
+        POT:RefreshCostOverlays()
+    end)
+
     local doneButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     doneButton:SetSize(100, 22)
-    doneButton:SetPoint("BOTTOM", f, "BOTTOM", 0, 16)
+    doneButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 16)
     doneButton:SetText("Done")
     doneButton:SetScript("OnClick", function()
         POT:SaveCeilingSetting(input:GetText())
@@ -422,6 +656,44 @@ function POT:CreateConfigPopup()
             input:SetText("")
         end
         showCostsCheck:SetChecked(PatronOrderTrackerDB.showCostOverlay ~= false)
+        local rf = PatronOrderTrackerDB.rewardFilter
+        knowledgeCheck:SetChecked(rf and rf.knowledge ~= false)
+        moxieCheck:SetChecked(rf and rf.moxie ~= false)
+        runeCheck:SetChecked(rf and rf.augmentRune ~= false)
+        UpdateRewardFilterUI()
+
+        -- Dynamic icons based on current profession
+        local profInfo = C_TradeSkillUI.GetChildProfessionInfo()
+        local profName = profInfo and (profInfo.parentProfessionName or profInfo.professionName)
+
+        local glimmerID = profName and PROF_GLIMMER_ITEMS[profName]
+        local flickerID = profName and PROF_FLICKER_ITEMS[profName]
+        local moxieID = profName and PROF_MOXIE_CURRENCIES[profName]
+
+        if glimmerID then
+            glimmerIcon.tex:SetTexture(C_Item.GetItemIconByID(glimmerID))
+            glimmerIcon.tooltipItemID = glimmerID
+        else
+            glimmerIcon.tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            glimmerIcon.tooltipItemID = nil
+        end
+        if flickerID then
+            flickerIcon.tex:SetTexture(C_Item.GetItemIconByID(flickerID))
+            flickerIcon.tooltipItemID = flickerID
+        else
+            flickerIcon.tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            flickerIcon.tooltipItemID = nil
+        end
+        if moxieID then
+            local info = C_CurrencyInfo.GetCurrencyInfo(moxieID)
+            moxieIcon.tex:SetTexture(info and info.iconFileID or "Interface\\Icons\\INV_Misc_QuestionMark")
+            moxieIcon.tooltipCurrencyID = moxieID
+        else
+            moxieIcon.tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            moxieIcon.tooltipCurrencyID = nil
+        end
+        runeIcon.tex:SetTexture(C_Item.GetItemIconByID(AUGMENT_RUNE_ITEM_ID))
+        runeIcon.tooltipItemID = AUGMENT_RUNE_ITEM_ID
     end)
 
     f.input = input
@@ -436,6 +708,71 @@ function POT:ToggleConfigPopup()
     else
         POT.configFrame:Show()
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- What's New popup
+-- ---------------------------------------------------------------------------
+
+function POT:ShowWhatsNew()
+    if POT.whatsNewFrame then
+        POT.whatsNewFrame:Show()
+        return
+    end
+
+    local f = CreateFrame("Frame", "PatronOrderTrackerWhatsNewFrame", UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(380, 300)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:EnableKeyboard(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then
+            self:SetPropagateKeyboardInput(false)
+            self:Hide()
+        else
+            self:SetPropagateKeyboardInput(true)
+        end
+    end)
+
+    f.TitleText:SetText("Patron Order Tracker — What's New")
+
+    local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", f.InsetBg, "TOPLEFT", 6, -6)
+    sf:SetPoint("BOTTOMRIGHT", f.InsetBg, "BOTTOMRIGHT", -24, 30)
+
+    local text = CreateFrame("Frame", nil, sf)
+    text:SetSize(1, 1)
+    sf:SetScrollChild(text)
+
+    local body = text:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    body:SetPoint("TOPLEFT")
+    body:SetWidth(sf:GetWidth() - 8)
+    body:SetJustifyH("LEFT")
+    body:SetJustifyV("TOP")
+    body:SetText(WHATS_NEW)
+    body:SetSpacing(2)
+
+    text:SetSize(body:GetStringWidth(), body:GetStringHeight() + 20)
+
+    local dismissButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    dismissButton:SetSize(80, 22)
+    dismissButton:SetPoint("BOTTOM", f, "BOTTOM", 0, 16)
+    dismissButton:SetText("Got it")
+
+    local function Dismiss()
+        PatronOrderTrackerDB.lastSeenVersion = POT.currentVersion
+        f:Hide()
+    end
+
+    dismissButton:SetScript("OnClick", Dismiss)
+    f.CloseButton:HookScript("OnClick", Dismiss)
+
+    POT.whatsNewFrame = f
 end
 
 -- ---------------------------------------------------------------------------
@@ -513,6 +850,7 @@ function POT:InjectButtons()
         if POT.trackButton then POT.trackButton:Hide() end
         if POT.configButton then POT.configButton:Hide() end
         if POT.clearButton then POT.clearButton:Hide() end
+        if POT.configFrame then POT.configFrame:Hide() end
     end)
     browseFrame:HookScript("OnShow", function()
         POT:UpdateButtonState()
@@ -528,6 +866,11 @@ function POT:InjectButtons()
 
     POT.initialized = true
     POT:UpdateButtonState()
+
+    if POT.showWhatsNew then
+        POT.showWhatsNew = false
+        POT:ShowWhatsNew()
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -560,7 +903,21 @@ local function UpdateRowCostOverlay(row, elementData)
     local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
     if not recipeInfo then return end
     if not recipeInfo.learned then
-        row.potCostText:SetText("|cff888888(not learned)|r")
+        row.potCostText:SetText("|cff888888(unlearned)|r")
+        row.potCostText:Show()
+        return
+    end
+
+    local isFree = not OrderNeedsShopping(order)
+
+    if isFree then
+        row.potCostText:SetText("|cff00ff00(free)|r")
+        row.potCostText:Show()
+        return
+    end
+
+    if RewardFilterNeedsCheck() and not OrderMatchesRewardFilter(order) then
+        row.potCostText:SetText("|cff888888(excluded)|r")
         row.potCostText:Show()
         return
     end
@@ -701,86 +1058,125 @@ function POT:ScanAndCreateList()
     local scannedCount = 0
     local skippedCount = 0
     local ceilingSkippedCount = 0
+    local rewardSkippedCount = 0
     local missingPriceCount = 0
     local reagentTotals = {}
     local ceiling = PatronOrderTrackerDB.priceCeiling
+    local checkRewards = RewardFilterNeedsCheck()
+    if useBuckets and checkRewards then
+        PrintMsg("|cffff8800Warning:|r Reward filters require individual order data. Browse into the order list first.")
+        checkRewards = false
+    end
 
-    if useBuckets then
-        for i, bucket in ipairs(buckets) do
-            local recipeInfo = C_TradeSkillUI.GetRecipeInfo(bucket.spellID)
-            DebugMsg(string.format("  Bucket[%d]: spellID=%s learned=%s numAvailable=%s",
-                i, tostring(bucket.spellID),
-                tostring(recipeInfo and recipeInfo.learned),
-                tostring(bucket.numAvailable)))
-            if recipeInfo and recipeInfo.learned then
-                if ceiling then
-                    local cost, hasMissing = POT:CalculateOrderCost(bucket.spellID, false, nil)
-                    if hasMissing then missingPriceCount = missingPriceCount + 1 end
-                    if cost and cost > ceiling then
-                        ceilingSkippedCount = ceilingSkippedCount + (bucket.numAvailable or 1)
-                        DebugMsg(string.format("  Bucket[%d]: cost %s exceeds ceiling, skipping %d orders",
-                            i, GetCoinTextureString(cost), bucket.numAvailable or 1))
+    local function RunScan()
+        if useBuckets then
+            for i, bucket in ipairs(buckets) do
+                local recipeInfo = C_TradeSkillUI.GetRecipeInfo(bucket.spellID)
+                DebugMsg(string.format("  Bucket[%d]: spellID=%s learned=%s numAvailable=%s",
+                    i, tostring(bucket.spellID),
+                    tostring(recipeInfo and recipeInfo.learned),
+                    tostring(bucket.numAvailable)))
+                if recipeInfo and recipeInfo.learned then
+                    if ceiling then
+                        local cost, hasMissing = POT:CalculateOrderCost(bucket.spellID, false, nil)
+                        if hasMissing then missingPriceCount = missingPriceCount + 1 end
+                        if cost and cost > ceiling then
+                            ceilingSkippedCount = ceilingSkippedCount + (bucket.numAvailable or 1)
+                            DebugMsg(string.format("  Bucket[%d]: cost %s exceeds ceiling, skipping %d orders",
+                                i, GetCoinTextureString(cost), bucket.numAvailable or 1))
+                        else
+                            POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
+                            scannedCount = scannedCount + 1
+                        end
                     else
                         POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
                         scannedCount = scannedCount + 1
                     end
                 else
-                    POT:CalculateSchematicReagents(bucket.spellID, false, bucket.numAvailable, reagentTotals)
-                    scannedCount = scannedCount + 1
+                    skippedCount = skippedCount + 1
                 end
-            else
-                skippedCount = skippedCount + 1
             end
-        end
-        PrintMsg("Estimated reagent counts. Individual order details not loaded.")
-    else
-        for i, order in ipairs(npcOrders) do
-            local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
-            local learned = recipeInfo and recipeInfo.learned
-            DebugMsg(string.format("  Order[%d]: spellID=%s learned=%s recraft=%s reagents=%d",
-                i, tostring(order.spellID), tostring(learned),
-                tostring(order.isRecraft), order.reagents and #order.reagents or 0))
-            if learned then
-                if ceiling then
-                    local customerProvided = BuildCustomerProvidedMap(order)
-                    local cost, hasMissing = POT:CalculateOrderCost(order.spellID, order.isRecraft, customerProvided)
-                    if hasMissing then missingPriceCount = missingPriceCount + 1 end
-                    if cost and cost > ceiling then
-                        ceilingSkippedCount = ceilingSkippedCount + 1
-                        DebugMsg(string.format("  Order[%d]: cost %s exceeds ceiling, skipping",
-                            i, GetCoinTextureString(cost)))
+            PrintMsg("Estimated reagent counts. Individual order details not loaded.")
+        else
+            for i, order in ipairs(npcOrders) do
+                local recipeInfo = C_TradeSkillUI.GetRecipeInfo(order.spellID)
+                local learned = recipeInfo and recipeInfo.learned
+                DebugMsg(string.format("  Order[%d]: spellID=%s learned=%s recraft=%s reagents=%d",
+                    i, tostring(order.spellID), tostring(learned),
+                    tostring(order.isRecraft), order.reagents and #order.reagents or 0))
+                if learned then
+                    if checkRewards and not OrderMatchesRewardFilter(order) then
+                        rewardSkippedCount = rewardSkippedCount + 1
+                        DebugMsg(string.format("  Order[%d]: no matching reward, skipping", i))
+                    elseif ceiling then
+                        local customerProvided = BuildCustomerProvidedMap(order)
+                        local cost, hasMissing = POT:CalculateOrderCost(order.spellID, order.isRecraft, customerProvided)
+                        if hasMissing then missingPriceCount = missingPriceCount + 1 end
+                        if cost and cost > ceiling then
+                            ceilingSkippedCount = ceilingSkippedCount + 1
+                            DebugMsg(string.format("  Order[%d]: cost %s exceeds ceiling, skipping",
+                                i, GetCoinTextureString(cost)))
+                        else
+                            POT:CalculatePlayerReagents(order, reagentTotals)
+                            scannedCount = scannedCount + 1
+                        end
                     else
                         POT:CalculatePlayerReagents(order, reagentTotals)
                         scannedCount = scannedCount + 1
                     end
                 else
-                    POT:CalculatePlayerReagents(order, reagentTotals)
-                    scannedCount = scannedCount + 1
+                    skippedCount = skippedCount + 1
                 end
+            end
+        end
+
+        if scannedCount == 0 then
+            local totalSkipped = skippedCount + ceilingSkippedCount + rewardSkippedCount
+            if totalSkipped > 0 then
+                local parts = {}
+                if skippedCount > 0 then
+                    table.insert(parts, string.format("%d for unlearned recipes", skippedCount))
+                end
+                if rewardSkippedCount > 0 then
+                    table.insert(parts, string.format("%d with no matching reward", rewardSkippedCount))
+                end
+                if ceilingSkippedCount > 0 then
+                    table.insert(parts, string.format("%d over the %s order budget",
+                        ceilingSkippedCount, GetCoinTextureString(PatronOrderTrackerDB.priceCeiling)))
+                end
+                PrintMsg("No shopping list created. " .. table.concat(parts, ", ") .. ".")
             else
-                skippedCount = skippedCount + 1
+                PrintMsg("No shopping list created. No fulfillable patron orders found.")
+            end
+            return
+        end
+
+        POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceilingSkippedCount, rewardSkippedCount, missingPriceCount)
+        POT:UpdateButtonState()
+    end
+
+    -- Pre-load reward item data so OrderMatchesRewardFilter can resolve names
+    local rewardItemIDs = {}
+    if checkRewards and not useBuckets then
+        for _, order in ipairs(npcOrders) do
+            if order.npcOrderRewards then
+                for _, reward in ipairs(order.npcOrderRewards) do
+                    local id = GetItemIDFromLink(reward.itemLink)
+                    if id then rewardItemIDs[id] = true end
+                end
             end
         end
     end
 
-    if scannedCount == 0 then
-        if ceilingSkippedCount > 0 and skippedCount == 0 then
-            PrintMsg(string.format("No shopping list created. All orders cost more than the %s order budget.",
-                GetCoinTextureString(PatronOrderTrackerDB.priceCeiling)))
-        elseif skippedCount > 0 and ceilingSkippedCount == 0 then
-            PrintMsg("No shopping list created. All recipes are unlearned.")
-        elseif skippedCount > 0 and ceilingSkippedCount > 0 then
-            PrintMsg(string.format("No shopping list created. %d for unlearned recipes, %d over the %s order budget.",
-                skippedCount, ceilingSkippedCount,
-                GetCoinTextureString(PatronOrderTrackerDB.priceCeiling)))
-        else
-            PrintMsg("No shopping list created. No fulfillable patron orders found.")
+    if next(rewardItemIDs) then
+        local container = ContinuableContainer:Create()
+        for id in pairs(rewardItemIDs) do
+            container:AddContinuable(Item:CreateFromItemID(id))
         end
-        return
+        container:ContinueOnLoad(RunScan)
+    else
+        RunScan()
     end
-
-    POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceilingSkippedCount, missingPriceCount)
-    POT:UpdateButtonState()
 end
 
 -- ---------------------------------------------------------------------------
@@ -872,7 +1268,7 @@ end
 -- Auctionator shopping list
 -- ---------------------------------------------------------------------------
 
-local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppingList, ceilingSkippedCount, missingPriceCount)
+local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppingList, ceilingSkippedCount, rewardSkippedCount, missingPriceCount)
     PrintMsg(string.format("Scanned %d patron order%s.", scannedCount, scannedCount == 1 and "" or "s"))
     if hasShoppingList and reagentCount > 0 then
         PrintMsg(string.format("Added %d reagent%s to shopping list.",
@@ -880,6 +1276,10 @@ local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppin
     end
     if skippedCount > 0 then
         PrintMsg(string.format("Skipped %d order%s for recipes you haven't learned.", skippedCount, skippedCount == 1 and "" or "s"))
+    end
+    if rewardSkippedCount and rewardSkippedCount > 0 then
+        PrintMsg(string.format("Skipped %d order%s with no matching reward.",
+            rewardSkippedCount, rewardSkippedCount == 1 and "" or "s"))
     end
     if ceilingSkippedCount and ceilingSkippedCount > 0 then
         PrintMsg(string.format("Skipped %d order%s over the order budget (%s).",
@@ -892,7 +1292,7 @@ local function PrintSummary(scannedCount, skippedCount, reagentCount, hasShoppin
     end
 end
 
-function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceilingSkippedCount, missingPriceCount)
+function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceilingSkippedCount, rewardSkippedCount, missingPriceCount)
     local totalReagentCount = 0
     for _, count in pairs(reagentTotals) do
         totalReagentCount = totalReagentCount + count
@@ -904,7 +1304,7 @@ function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceili
     end
 
     if #pendingItems == 0 then
-        PrintSummary(scannedCount, skippedCount, 0, false, ceilingSkippedCount, missingPriceCount)
+        PrintSummary(scannedCount, skippedCount, 0, false, ceilingSkippedCount, rewardSkippedCount, missingPriceCount)
         return
     end
 
@@ -929,10 +1329,10 @@ function POT:CreateShoppingList(reagentTotals, scannedCount, skippedCount, ceili
 
         if #searchStrings > 0 then
             Auctionator.API.v1.CreateShoppingList(ADDON_NAME, POT.shoppingListName, searchStrings)
-            PrintSummary(scannedCount, skippedCount, totalReagentCount, true, ceilingSkippedCount, missingPriceCount)
+            PrintSummary(scannedCount, skippedCount, totalReagentCount, true, ceilingSkippedCount, rewardSkippedCount, missingPriceCount)
             PrintMsg("Created shopping list: " .. POT.shoppingListName)
         else
-            PrintSummary(scannedCount, skippedCount, 0, false, ceilingSkippedCount, missingPriceCount)
+            PrintSummary(scannedCount, skippedCount, 0, false, ceilingSkippedCount, rewardSkippedCount, missingPriceCount)
             PrintMsg("No player-supplied reagents needed. Customers provided everything.")
         end
     end)

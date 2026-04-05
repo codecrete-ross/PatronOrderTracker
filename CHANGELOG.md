@@ -1,3 +1,11 @@
+## 1.2.0
+
+- **Reward filters**: Choose which patron order rewards to include in your shopping list — knowledge points, Artisan's Moxie, or Augment Runes. Uncheck all to disable filtering.
+- **Redesigned settings panel**: Native WoW-styled dialog with profession-specific reward icons and item tooltips on hover.
+- **What's New popup**: Shows once after each update with a summary of changes.
+- Orders where the customer provides all reagents now show as "(free)" in the order list
+- `/pot dump` now shows each order's rewards
+
 ## 1.1.3
 
 - Fixed cost overlays not appearing on first open of the crafting orders page

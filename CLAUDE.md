@@ -60,7 +60,10 @@ Never push, tag, or release untested changes. Copy to the WoW folder and stop �
 - Only Basic (mandatory) reagents are included in the shopping list. Modifying/Finishing/Automatic are optional and excluded.
 - No bag inventory subtraction — matches Auctionator's own convention for tracked recipe searches.
 - No recipe tracking (SetRecipeTracked) — removed in v1.0.1, the addon focuses purely on the Auctionator shopping list.
-- No SavedVariables — clear button checks Auctionator's live state directly via ListManager:GetIndexForName.
+- Reward filters use English item name matching ("Knowledge", "Augment Rune") and `currencyType` ID matching for Moxie. Not localized.
+- Settings dialog uses `BasicFrameTemplateWithInset` — no `f.Inset` child frame exists, only textures like `f.InsetBg`. Anchor content to `f.InsetBg`, parent widgets to `f`.
+- Reward item data is pre-loaded via `ContinuableContainer` before filtering, because `npcOrderRewards` itemLinks can have empty name brackets when uncached.
+- Orders with all reagents customer-provided show `(free)` in the overlay — informational only, not a setting.
 
 ## Changelog Style
 
@@ -73,6 +76,7 @@ Changelog entries must be written for end users, not developers. Use plain langu
 - License: All Rights Reserved
 - `.pkgmeta` excludes: `.github`, `.gitignore`, `README.md`, `.pkgmeta`, `logo.png`
 - `.pkgmeta` includes `CHANGELOG.md` via manual-changelog directive for CF changelog display
+- **Tags use plain version numbers** — `1.2.0`, not `v1.2.0`. No `v` prefix anywhere (tags, release titles, commit messages).
 
 ## Slash Commands
 
